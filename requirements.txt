@@ -9,4 +9,6 @@ pydantic[email]
 passlib[bcrypt]
 httpx
 passlib[bcrypt]
+python-jose[cryptography]
+
 
