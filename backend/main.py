@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -11,7 +11,9 @@ from backend.routes.user_data import router as user_router
 from backend.auth import get_password_hash
 from backend.email_service import send_verification_email
 
+import os
 import random
+import requests
 
 # ---------------------- Initialisation de l'application FastAPI ----------------------
 
@@ -27,12 +29,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------------- Création automatique des tables à la startup ----------------------
+# ---------------------- Création des tables + configuration du webhook Telegram ----------------------
 
 @app.on_event("startup")
 async def startup():
+    # Création des tables
     async with engine.begin() as conn:
         await conn.run_sync(models.Base.metadata.create_all)
+
+    # Configuration du webhook Telegram
+    telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    webhook_url = os.getenv("WEBHOOK_URL")  # Exemple : https://blackcoin-backend.onrender.com/webhook
+
+    if telegram_token and webhook_url:
+        telegram_api_url = f"https://api.telegram.org/bot{telegram_token}/setWebhook"
+        response = requests.post(telegram_api_url, data={"url": webhook_url})
+        print("✅ Webhook Telegram défini :", response.json())
+    else:
+        print("❌ TELEGRAM_BOT_TOKEN ou WEBHOOK_URL manquant dans les variables d’environnement.")
 
 # ---------------------- ROUTE 1 : Inscription + envoi du code de vérification ----------------------
 
@@ -41,7 +55,6 @@ async def register_user(user_data: schemas.UserCreate, db: AsyncSession = Depend
     if user_data.password != user_data.confirm_password:
         raise HTTPException(status_code=400, detail="Les mots de passe ne correspondent pas.")
 
-    # Vérifie si un utilisateur existe déjà avec le même email ou nom d'utilisateur Telegram
     result = await db.execute(
         select(User).filter(
             (User.email == user_data.email) | (User.telegram_username == user_data.telegram_username)
@@ -51,10 +64,8 @@ async def register_user(user_data: schemas.UserCreate, db: AsyncSession = Depend
     if existing_user:
         raise HTTPException(status_code=400, detail="Email ou nom d'utilisateur Telegram déjà utilisé.")
 
-    # Hasher le mot de passe
     hashed_password = get_password_hash(user_data.password)
 
-    # Création du nouvel utilisateur (sans Telegram ID)
     new_user = User(
         first_name=user_data.first_name,
         last_name=user_data.last_name,
@@ -69,13 +80,11 @@ async def register_user(user_data: schemas.UserCreate, db: AsyncSession = Depend
     await db.commit()
     await db.refresh(new_user)
 
-    # Générer un code de vérification aléatoire à 6 chiffres
     code = str(random.randint(100000, 999999))
     email_code = EmailVerificationCode(user_id=new_user.id, code=code)
     db.add(email_code)
     await db.commit()
 
-    # Envoi du code de vérification par email
     send_verification_email(user_data.email, code)
 
     return {"detail": "Code de vérification envoyé à votre adresse email."}
@@ -84,30 +93,25 @@ async def register_user(user_data: schemas.UserCreate, db: AsyncSession = Depend
 
 @app.post("/verify-email", response_model=schemas.Message)
 async def verify_email(data: schemas.EmailCodeIn, db: AsyncSession = Depends(get_db)):
-    # Récupération de l'utilisateur par email
     result = await db.execute(select(User).where(User.email == data.email))
     user = result.scalars().first()
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur non trouvé.")
 
-    # Récupération du code de vérification associé à l'utilisateur
     result = await db.execute(select(EmailVerificationCode).where(EmailVerificationCode.user_id == user.id))
     code_entry = result.scalars().first()
     if not code_entry or code_entry.code != data.code:
         raise HTTPException(status_code=400, detail="Code de vérification incorrect.")
 
-    # Vérification du nom d'utilisateur Telegram via l'API
     telegram_info = await verify_telegram_username(user.telegram_username)
     if not telegram_info:
         raise HTTPException(status_code=400, detail="Nom d'utilisateur Telegram invalide.")
 
-    # Mise à jour des informations de l'utilisateur
     user.telegram_id = telegram_info["id"]
     user.telegram_photo = telegram_info.get("photo_url")
     user.is_verified = True
     await db.commit()
 
-    # Création du profil utilisateur et du wallet
     profile = Profile(user_id=user.id)
     wallet = Wallet(user_id=user.id)
     db.add_all([profile, wallet])
@@ -115,6 +119,20 @@ async def verify_email(data: schemas.EmailCodeIn, db: AsyncSession = Depends(get
 
     return {"detail": "Votre compte a été vérifié et créé avec succès."}
 
+# ---------------------- ROUTE 3 : Webhook Telegram ----------------------
+
+@app.post("/webhook")
+async def telegram_webhook(request: Request):
+    payload = await request.json()
+    print("📩 Nouveau message Telegram reçu :", payload)
+    return {"ok": True}
+
 # ---------------------- ROUTES UTILISATEUR ----------------------
 
 app.include_router(user_router, tags=["Utilisateur"])
+
+# ---------------------- ROUTE DE TEST ROOT ----------------------
+
+@app.get("/")
+def read_root():
+    return {"message": "🚀 Backend BlackCoin en ligne !"}
