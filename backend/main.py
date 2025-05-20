@@ -19,11 +19,15 @@ import requests
 
 app = FastAPI()
 
-# ---------------------- Middleware CORS ----------------------
+# ✅ Ajoute ton frontend ici
+origins = [
+    "https://blackcoin-v5-frontend.vercel.app",
+    "http://localhost:3000",  # pour le dev local éventuellement
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # À restreindre à ton domaine frontend en production
+    allow_origins=origins,  # 🔥 Ne mets pas ["*"] si tu envoies des cookies ou headers protégés
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
