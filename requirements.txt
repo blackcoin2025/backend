@@ -6,11 +6,8 @@ psycopg2-binary
 python-dotenv
 email-validator
 pydantic[email]
+bcrypt>=4.0.1,<5.0  # ← version stable explicitement définie
 passlib[bcrypt]
 httpx
-passlib[bcrypt]
 python-jose[cryptography]
 requests
-
-
-
