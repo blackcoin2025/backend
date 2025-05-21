@@ -42,6 +42,15 @@ class UserCreate(BaseModel):
     confirm_password: str
 
 # ============================
+# UTILISATEUR - Connexion
+# ============================
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+    telegram_username: str  # Ajout obligatoire pour valider l'identité Telegram
+
+# ============================
 # UTILISATEUR - Sortie de base
 # ============================
 
