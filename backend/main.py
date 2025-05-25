@@ -2,15 +2,16 @@ from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from dotenv import load_dotenv
+
 import os
 import random
 import requests
-from dotenv import load_dotenv
 
 # Chargement des variables d’environnement
 load_dotenv()
 
-# Import internes
+# Imports locaux
 from backend.database import get_db, engine
 from backend import models, schemas
 from backend.models import User, Profile, Wallet, EmailVerificationCode
@@ -20,15 +21,16 @@ from backend.routes.admin_routes import router as admin_router
 from backend.auth import get_password_hash
 from backend.email_service import send_verification_email
 
-# ---------------------- Initialisation FastAPI ----------------------
+# Initialisation de l'application FastAPI
 app = FastAPI()
 
-# ---------------------- CORS ----------------------
+# Origines autorisées (frontend)
 origins = [
     "https://blackcoin-v5-frontend.vercel.app",
     "http://localhost:3000",  # Dev local
 ]
 
+# Middleware CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -37,28 +39,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------------- Variables Admin ----------------------
-ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
-ADMIN_TELEGRAM = os.getenv("ADMIN_TELEGRAM")
+# ---------------------- STARTUP : Création des tables & Webhook Telegram ----------------------
 
-# ---------------------- Startup : DB + Webhook ----------------------
 @app.on_event("startup")
 async def startup():
+    # Création des tables
     async with engine.begin() as conn:
         await conn.run_sync(models.Base.metadata.create_all)
 
+    # Configuration du webhook Telegram
     telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    webhook_url = os.getenv("WEBHOOK_URL")
+    webhook_url = os.getenv("WEBHOOK_URL")  # Exemple : https://blackcoin-backend.onrender.com/webhook
 
     if telegram_token and webhook_url:
         telegram_api_url = f"https://api.telegram.org/bot{telegram_token}/setWebhook"
         response = requests.post(telegram_api_url, data={"url": webhook_url})
         print("✅ Webhook Telegram défini :", response.json())
     else:
-        print("❌ TELEGRAM_BOT_TOKEN ou WEBHOOK_URL manquant dans .env")
+        print("❌ TELEGRAM_BOT_TOKEN ou WEBHOOK_URL manquant dans les variables d’environnement.")
 
-# ---------------------- ROUTE : Register ----------------------
+# ---------------------- ROUTE 1 : Inscription & envoi du code ----------------------
+
 @app.post("/register", response_model=schemas.Message)
 async def register_user(user_data: schemas.UserCreate, db: AsyncSession = Depends(get_db)):
     if user_data.password != user_data.confirm_password:
@@ -89,6 +90,7 @@ async def register_user(user_data: schemas.UserCreate, db: AsyncSession = Depend
     await db.commit()
     await db.refresh(new_user)
 
+    # Envoi du code
     code = str(random.randint(100000, 999999))
     email_code = EmailVerificationCode(user_id=new_user.id, code=code)
     db.add(email_code)
@@ -98,7 +100,8 @@ async def register_user(user_data: schemas.UserCreate, db: AsyncSession = Depend
 
     return {"detail": "Code de vérification envoyé à votre adresse email."}
 
-# ---------------------- ROUTE : Verify Email ----------------------
+# ---------------------- ROUTE 2 : Vérification de l'email ----------------------
+
 @app.post("/verify-email", response_model=schemas.Message)
 async def verify_email(data: schemas.EmailCodeIn, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == data.email))
@@ -115,11 +118,13 @@ async def verify_email(data: schemas.EmailCodeIn, db: AsyncSession = Depends(get
     if not telegram_info:
         raise HTTPException(status_code=400, detail="Nom d'utilisateur Telegram invalide.")
 
+    # Mise à jour du compte
     user.telegram_id = telegram_info["id"]
     user.telegram_photo = telegram_info.get("photo_url")
     user.is_verified = True
     await db.commit()
 
+    # Création du profil et du wallet
     profile = Profile(user_id=user.id)
     wallet = Wallet(user_id=user.id)
     db.add_all([profile, wallet])
@@ -127,18 +132,21 @@ async def verify_email(data: schemas.EmailCodeIn, db: AsyncSession = Depends(get
 
     return {"detail": "Votre compte a été vérifié et créé avec succès."}
 
-# ---------------------- Webhook Telegram ----------------------
+# ---------------------- ROUTE 3 : Webhook Telegram ----------------------
+
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
     payload = await request.json()
     print("📩 Nouveau message Telegram reçu :", payload)
     return {"ok": True}
 
-# ---------------------- Routes externes ----------------------
+# ---------------------- ROUTES UTILISATEUR & ADMIN ----------------------
+
 app.include_router(user_router, tags=["Utilisateur"])
 app.include_router(admin_router, tags=["Admin"])
 
-# ---------------------- Root ----------------------
+# ---------------------- ROUTE ROOT ----------------------
+
 @app.get("/")
 def read_root():
     return {"message": "🚀 Backend BlackCoin en ligne !"}
