@@ -17,11 +17,9 @@ import os
 import random
 import requests
 from dotenv import load_dotenv
-from config import settings
 
 
 # ---------------------- Initialisation de l'application FastAPI ----------------------
-print("🔐 EMAIL_PASSWORD:", settings.EMAIL_PASSWORD)
 app = FastAPI()
 load_dotenv()
 

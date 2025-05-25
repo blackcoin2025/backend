@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     EMAIL_HOST: str                # Serveur SMTP (ex: smtp.gmail.com)
     EMAIL_PORT: int                # Port SMTP (587 pour TLS)
     EMAIL_HOST_USER: str           # Utilisateur SMTP (souvent identique à EMAIL_FROM)
-    EMAIL_HOST_PASSWORD: str       # Mot de passe SMTP (souvent identique à EMAIL_PASSWORD)
+    EMAIL_PASSWORD: str
     EMAIL_FROM_NAME: str           # Nom affiché lors de l’envoi des mails
 
     # ============================
