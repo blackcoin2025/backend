@@ -10,20 +10,30 @@ from backend.telegram_bot import verify_telegram_username
 from backend.routes.user_data import router as user_router
 from backend.auth import get_password_hash
 from backend.email_service import send_verification_email
+from backend.routes.admin_routes import router as admin_router
+app.include_router(admin_router, tags=["Admin"])
 
 import os
 import random
 import requests
+from dotenv import load_dotenv
+from config import settings
+
 
 # ---------------------- Initialisation de l'application FastAPI ----------------------
-
+print("🔐 EMAIL_PASSWORD:", settings.EMAIL_PASSWORD)
 app = FastAPI()
+load_dotenv()
 
 # ✅ Ajoute ton frontend ici
 origins = [
     "https://blackcoin-v5-frontend.vercel.app",
     "http://localhost:3000",  # pour le dev local éventuellement
 ]
+
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
+ADMIN_TELEGRAM = os.getenv("ADMIN_TELEGRAM")
 
 app.add_middleware(
     CORSMiddleware,
@@ -134,6 +144,7 @@ async def telegram_webhook(request: Request):
 # ---------------------- ROUTES UTILISATEUR ----------------------
 
 app.include_router(user_router, tags=["Utilisateur"])
+app.include_router(admin_router, tags=["Admin"])
 
 # ---------------------- ROUTE DE TEST ROOT ----------------------
 

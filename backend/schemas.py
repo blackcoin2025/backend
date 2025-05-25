@@ -1,7 +1,13 @@
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
 from datetime import date, datetime
+from pydantic import BaseModel
 
+
+class AdminCodeValidationResponse(BaseModel):
+    success: bool
+    message: str
+    
 # ============================
 # PROFIL
 # ============================
@@ -114,6 +120,11 @@ class EmailCodeIn(BaseModel):
 # ============================
 # REPONSES GENERIQUES
 # ============================
+
+class AdminLoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+    telegram_username: str
 
 class Message(BaseModel):
     detail: str

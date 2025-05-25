@@ -2,6 +2,8 @@ from sqlalchemy import Column, String, Integer, Date, Boolean, ForeignKey, DateT
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from backend.database import Base
+from sqlalchemy import Column, Integer, String, DateTime
+from datetime import datetime
 
 class User(Base):
     __tablename__ = "users"
@@ -26,6 +28,14 @@ class User(Base):
     wallet = relationship("Wallet", back_populates="user", uselist=False)
     email_verification = relationship("EmailVerificationCode", back_populates="user", uselist=False)
 
+
+class AdminVerificationCode(Base):
+    __tablename__ = "admin_verification_codes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, index=True)
+    code = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 class EmailVerificationCode(Base):
     __tablename__ = "email_verification_codes"
@@ -61,3 +71,4 @@ class Wallet(Base):
     balance = Column(Integer, default=0)
 
     user = relationship("User", back_populates="wallet")
+    
