@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from dotenv import load_dotenv
+from backend.routes.auth_routes import router as auth_router
+
 
 import os
 import random
@@ -144,6 +146,7 @@ async def telegram_webhook(request: Request):
 
 app.include_router(user_router, tags=["Utilisateur"])
 app.include_router(admin_router, tags=["Admin"])
+app.include_router(auth_router, tags=["Authentification"])
 
 # ---------------------- ROUTE ROOT ----------------------
 
