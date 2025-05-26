@@ -6,7 +6,7 @@ from backend.database import get_db
 from backend.schemas import UserLogin
 from backend.crud import get_user_by_email
 from backend.auth import verify_password, create_access_token
-from backend.utils import generate_verification_code
+from backend.email_service import generate_verification_code
 from backend.models import EmailVerificationCode
 from backend.email_service import send_verification_email
 

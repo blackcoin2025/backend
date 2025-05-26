@@ -3,6 +3,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import os
 from dotenv import load_dotenv
+import random
 
 load_dotenv()
 
@@ -12,6 +13,8 @@ EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
 EMAIL_FROM_NAME = os.getenv("EMAIL_FROM_NAME", "Blackcoin Support")
 
+def generate_verification_code(length: int = 6) -> str:
+    return ''.join(str(random.randint(0, 9)) for _ in range(length))
 
 def send_verification_email(to_email: str, code: str) -> bool:
     if not all([EMAIL_HOST, EMAIL_PORT, EMAIL_HOST_USER, EMAIL_HOST_PASSWORD]):
