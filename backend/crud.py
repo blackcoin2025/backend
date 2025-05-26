@@ -13,7 +13,6 @@ def generate_code():
     return secrets.token_hex(3)[:CODE_LENGTH]  # Ex: "a1b2c3"
 
 async def create_user(db: AsyncSession, user_data: UserCreate):
-    # Vérifie si l'email ou le nom d'utilisateur Telegram est déjà utilisé
     query = select(User).where(
         (User.email == user_data.email) |
         (User.telegram_username == user_data.telegram_username)
@@ -25,9 +24,7 @@ async def create_user(db: AsyncSession, user_data: UserCreate):
         if existing_user.is_verified:
             raise ValueError("Email ou nom d'utilisateur Telegram déjà utilisé.")
         else:
-            # Utilisateur non vérifié : on régénère un code
             code = generate_code()
-            # Vérifie si un code existe déjà
             if existing_user.email_verification:
                 existing_user.email_verification.code = code
                 existing_user.email_verification.created_at = datetime.utcnow()
@@ -42,7 +39,6 @@ async def create_user(db: AsyncSession, user_data: UserCreate):
             send_verification_email(existing_user.email, code)
             return existing_user
 
-    # Créer un nouveau compte utilisateur
     new_user = User(
         email=user_data.email,
         first_name=user_data.first_name,
@@ -52,13 +48,13 @@ async def create_user(db: AsyncSession, user_data: UserCreate):
         telegram_username=user_data.telegram_username,
         telegram_id=None,
         telegram_photo=None,
-        password_hash=user_data.password,  # Attention : doit être hashé avant
+        password_hash=user_data.password,  # 🔐 À hasher correctement
         is_verified=False
     )
 
     try:
         db.add(new_user)
-        await db.flush()  # pour obtenir new_user.id
+        await db.flush()
 
         code = generate_code()
         verification = EmailVerificationCode(
@@ -79,3 +75,13 @@ async def create_user(db: AsyncSession, user_data: UserCreate):
     except Exception as e:
         await db.rollback()
         raise RuntimeError(f"Erreur inattendue : {str(e)}")
+
+# 🔽 Ajout des fonctions manquantes
+
+async def get_user_by_email(db: AsyncSession, email: str):
+    result = await db.execute(select(User).where(User.email == email))
+    return result.scalars().first()
+
+async def get_user_by_telegram_username(db: AsyncSession, username: str):
+    result = await db.execute(select(User).where(User.telegram_username == username))
+    return result.scalars().first()
