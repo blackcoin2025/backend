@@ -1,14 +1,14 @@
 fastapi
-uvicorn[standard]
-sqlalchemy[asyncio]
-asyncpg
-psycopg2-binary
+uvicorn
 python-dotenv
+sqlalchemy
+psycopg2-binary
+pydantic
+aiogram
 email-validator
-pydantic[email]
-bcrypt>=4.0.1,<5.0  # ← version stable explicitement définie
-passlib[bcrypt]
-httpx
-python-jose[cryptography]
+uvicorn[standard]
+fastapi
+uvicorn
+psycopg2
 requests
-pydantic-settings
+
