@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from app.routers import telegram
 
 from app.database import Base
 from app.routers import (
@@ -63,6 +64,7 @@ app.include_router(wallet.router, prefix="/wallet", tags=["Wallet"])
 app.include_router(actions.router, prefix="/actions", tags=["Actions"])
 app.include_router(status.router, prefix="/status", tags=["Status"])
 app.include_router(myactions.router, prefix="/myactions", tags=["MyActions"])
+app.include_router(telegram.router, prefix="/telegram", tags=["Telegram"])
 
 # 🔗 Endpoint racine
 @app.get("/")

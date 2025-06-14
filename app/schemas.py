@@ -1,10 +1,21 @@
 from pydantic import BaseModel, ConfigDict
 from typing import Optional, Dict
 from datetime import datetime
+from pydantic import BaseModel
 
 # ----- Configuration commune -----
 class BaseSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    # ----- Telegram Authentication Schema -----
+class TelegramAuthData(BaseModel):
+    id: int
+    first_name: str
+    last_name: Optional[str] = None
+    username: Optional[str] = None
+    photo_url: Optional[str] = None
+    auth_date: int
+    hash: str
 
 # ----- User Schemas -----
 class UserBase(BaseSchema):
