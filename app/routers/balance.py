@@ -1,25 +1,29 @@
 # app/routers/balance.py
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 from app.database import get_db
 from app.models import Balance
 from app.schemas import BalanceBase, BalanceOut
 
-router = APIRouter()
+router = APIRouter(prefix="/wallet", tags=["Balance"])
 
-@router.get("/{telegram_id}", response_model=BalanceOut)
-def get_balance(telegram_id: str, db: Session = Depends(get_db)):
-    balance = db.query(Balance).filter(Balance.telegram_id == telegram_id).first()
+@router.get("/{telegram_id}/balance", response_model=BalanceOut)
+async def get_balance(telegram_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Balance).where(Balance.telegram_id == telegram_id))
+    balance = result.scalar_one_or_none()
     if not balance:
         raise HTTPException(status_code=404, detail="Balance not found")
     return balance
 
-@router.put("/{telegram_id}", response_model=BalanceOut)
-def update_balance(telegram_id: str, balance_data: BalanceBase, db: Session = Depends(get_db)):
-    balance = db.query(Balance).filter(Balance.telegram_id == telegram_id).first()
+@router.put("/{telegram_id}/balance", response_model=BalanceOut)
+async def update_balance(telegram_id: str, balance_data: BalanceBase, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Balance).where(Balance.telegram_id == telegram_id))
+    balance = result.scalar_one_or_none()
     if not balance:
         raise HTTPException(status_code=404, detail="Balance not found")
+
     balance.points = balance_data.points
-    db.commit()
-    db.refresh(balance)
+    await db.commit()
+    await db.refresh(balance)
     return balance

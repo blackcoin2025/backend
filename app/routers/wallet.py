@@ -1,34 +1,37 @@
 # app/routers/wallet.py
+
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 from app.database import get_db
 from app.models import Wallet
-from app.schemas import WalletBase
+from app.schemas import WalletBase, WalletOut
 
-router = APIRouter()
+router = APIRouter(prefix="/wallet", tags=["Wallet"])
 
-@router.get("/{telegram_id}")
-def get_wallet(telegram_id: str, db: Session = Depends(get_db)):
-    wallet = db.query(Wallet).filter(Wallet.telegram_id == telegram_id).first()
+@router.get("/{telegram_id}", response_model=WalletOut)
+async def get_wallet(telegram_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Wallet).where(Wallet.telegram_id == telegram_id))
+    wallet = result.scalar_one_or_none()
     if not wallet:
         raise HTTPException(status_code=404, detail="Wallet not found")
     return wallet
 
-@router.post("/")
-def create_wallet(wallet_data: WalletBase, db: Session = Depends(get_db)):
-    wallet = Wallet(**wallet_data.dict())
-    db.add(wallet)
-    db.commit()
-    db.refresh(wallet)
-    return wallet
+@router.post("/", response_model=WalletOut)
+async def create_wallet(wallet_data: WalletBase, db: AsyncSession = Depends(get_db)):
+    new_wallet = Wallet(**wallet_data.dict())
+    db.add(new_wallet)
+    await db.commit()
+    await db.refresh(new_wallet)
+    return new_wallet
 
-@router.put("/{telegram_id}")
-def update_wallet(telegram_id: str, wallet_data: WalletBase, db: Session = Depends(get_db)):
-    wallet = db.query(Wallet).filter(Wallet.telegram_id == telegram_id).first()
+@router.put("/{telegram_id}", response_model=WalletOut)
+async def update_wallet(telegram_id: str, wallet_data: WalletBase, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Wallet).where(Wallet.telegram_id == telegram_id))
+    wallet = result.scalar_one_or_none()
     if not wallet:
         raise HTTPException(status_code=404, detail="Wallet not found")
     wallet.ton_wallet_address = wallet_data.ton_wallet_address
-    db.commit()
-    db.refresh(wallet)
+    await db.commit()
+    await db.refresh(wallet)
     return wallet
-
