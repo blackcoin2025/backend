@@ -1,13 +1,12 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, EmailStr, ConfigDict
 from typing import Optional, Dict
 from datetime import datetime
-from pydantic import BaseModel
 
 # ----- Configuration commune -----
 class BaseSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
-    # ----- Telegram Authentication Schema -----
+# ----- Telegram Auth -----
 class TelegramAuthData(BaseModel):
     id: int
     first_name: str
@@ -28,24 +27,26 @@ class TelegramAuthRequest(BaseModel):
 class UserBase(BaseSchema):
     telegram_id: str
     first_name: str
+    last_name: Optional[str] = None
     username: Optional[str] = None
     photo_url: Optional[str] = None
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    birth_date: Optional[str] = None
 
 class UserCreate(UserBase):
     pass
 
 class UserUpdate(BaseSchema):
     first_name: Optional[str] = None
-    username: Optional[str] = None
-    photo_url: Optional[str] = None
-
-class UserOut(BaseModel):
-    telegram_id: str
-    first_name: str
     last_name: Optional[str] = None
     username: Optional[str] = None
     photo_url: Optional[str] = None
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    birth_date: Optional[str] = None
 
+class UserOut(UserBase):
     class Config:
         orm_mode = True
 
@@ -127,7 +128,7 @@ class MyActionBase(BaseSchema):
     title: str
     description: Optional[str] = None
     created_by: Optional[str] = None
-    extra_metadata: Optional[Dict] = None  # éviter d'utiliser 'metadata'
+    extra_metadata: Optional[Dict] = None
 
 class MyActionCreate(MyActionBase):
     pass

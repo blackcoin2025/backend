@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.database import get_db
-from app.models import UserProfile, Level, Balance, Wallet, TaskStat, Ranking
+from app.models import User, Level, Balance, Wallet, Task, Ranking
 from app.schemas import TelegramAuthRequest, UserOut
 from app.services.telegram_auth import verify_telegram_auth_data
 
@@ -22,14 +22,14 @@ async def auth_telegram(data: TelegramAuthRequest, db: AsyncSession = Depends(ge
         raise HTTPException(status_code=401, detail="Données Telegram invalides.")
 
     # 2. Vérifier si l'utilisateur existe déjà
-    result = await db.execute(select(UserProfile).where(UserProfile.telegram_id == data.telegram_id))
+    result = await db.execute(select(User).where(User.telegram_id == data.telegram_id))
     user = result.scalar_one_or_none()
 
     if user:
         return user  # Utilisateur déjà enregistré → on le renvoie simplement
 
     # 3. Nouvel utilisateur → Création + Bonus de bienvenue + Bonus canal
-    user = UserProfile(**data.model_dump())
+    user = User(**data.model_dump())
     db.add(user)
     await db.commit()
     await db.refresh(user)
@@ -39,9 +39,9 @@ async def auth_telegram(data: TelegramAuthRequest, db: AsyncSession = Depends(ge
     welcome_wallet = WELCOME_BONUS - welcome_balance
 
     balance = Balance(telegram_id=user.telegram_id, points=welcome_balance)
-    wallet = Wallet(telegram_id=user.telegram_id, ton_wallet_address="PLACEHOLDER_ADDRESS", is_verified=False)
-    level = Level(telegram_id=user.telegram_id, xp=welcome_balance)
-    ranking = Ranking(telegram_id=user.telegram_id, rank=1)
+    wallet = Wallet(telegram_id=user.telegram_id, task_earnings=0, referral_earnings=welcome_wallet)
+    level = Level(telegram_id=user.telegram_id, level=1, experience=welcome_balance)
+    ranking = Ranking(telegram_id=user.telegram_id, score=welcome_balance)
 
     db.add_all([balance, wallet, level, ranking])
 
@@ -50,17 +50,20 @@ async def auth_telegram(data: TelegramAuthRequest, db: AsyncSession = Depends(ge
     task_balance = int(task_reward * BONUS_SPLIT)
     task_wallet = task_reward - task_balance
 
-    task_stat = TaskStat(
+    # Marquer la tâche "rejoindre le canal" comme faite
+    join_task = Task(
         telegram_id=user.telegram_id,
-        completed=1,
-        validated=1,
+        task_name="Join Telegram Channel",
+        completed=True,
+        reward=task_reward
     )
-    db.add(task_stat)
+    db.add(join_task)
 
-    # Mise à jour des valeurs avec le bonus canal
+    # Mise à jour du solde, niveau et classement avec le bonus canal
     balance.points += task_balance
-    wallet.is_verified = True  # par exemple après canal
-    level.xp += task_balance
+    wallet.task_earnings += task_wallet
+    level.experience += task_balance
+    ranking.score += task_balance
 
     await db.commit()
     await db.refresh(user)

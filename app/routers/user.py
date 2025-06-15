@@ -6,6 +6,7 @@ from sqlalchemy.future import select
 from app.database import get_db
 from app.models import UserProfile
 from app.schemas import UserCreate, UserOut
+from app.schemas import UserUpdate  # à ajouter si ce n’est pas déjà fait
 
 router = APIRouter(prefix="/user", tags=["User"])
 
@@ -28,4 +29,18 @@ async def get_user(telegram_id: str, db: AsyncSession = Depends(get_db)):
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+@router.put("/update/{telegram_id}", response_model=UserOut)
+async def update_user(telegram_id: str, data: UserUpdate, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(UserProfile).where(UserProfile.telegram_id == telegram_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    for key, value in data.model_dump(exclude_unset=True).items():
+        setattr(user, key, value)
+
+    await db.commit()
+    await db.refresh(user)
     return user
