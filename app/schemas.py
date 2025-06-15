@@ -17,6 +17,13 @@ class TelegramAuthData(BaseModel):
     auth_date: int
     hash: str
 
+class TelegramAuthRequest(BaseModel):
+    telegram_id: str
+    first_name: str
+    last_name: Optional[str] = None
+    username: Optional[str] = None
+    photo_url: Optional[str] = None
+
 # ----- User Schemas -----
 class UserBase(BaseSchema):
     telegram_id: str
@@ -32,9 +39,15 @@ class UserUpdate(BaseSchema):
     username: Optional[str] = None
     photo_url: Optional[str] = None
 
-class UserOut(UserBase):
-    id: int
-    created_at: datetime
+class UserOut(BaseModel):
+    telegram_id: str
+    first_name: str
+    last_name: Optional[str] = None
+    username: Optional[str] = None
+    photo_url: Optional[str] = None
+
+    class Config:
+        orm_mode = True
 
 # ----- Task Schemas -----
 class TaskBase(BaseSchema):
