@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
 from app.routers import (
-    telegram,
+    auth,
     user,
     balance,
     level,
@@ -70,7 +70,7 @@ app.include_router(wallet.router, prefix="/wallet", tags=["Wallet"])
 app.include_router(actions.router, prefix="/actions", tags=["Actions"])
 app.include_router(status.router, prefix="/status", tags=["Status"])
 app.include_router(myactions.router, prefix="/myactions", tags=["MyActions"])
-app.include_router(telegram.router, prefix="/telegram", tags=["Telegram"])
+app.include_router(auth.router)  # déjà taggé avec /auth dans le router lui-même
 
 # 🔗 Endpoint racine
 @app.get("/")
