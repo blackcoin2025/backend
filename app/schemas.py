@@ -48,7 +48,7 @@ class UserUpdate(BaseSchema):
 
 class UserOut(UserBase):
     class Config:
-        orm_mode = True
+        model_config = {"from_attributes": True}
 
 # ----- Task Schemas -----
 class TaskBase(BaseSchema):
