@@ -1,8 +1,7 @@
-# app/routers/wallet.py
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+
 from app.database import get_db
 from app.models import Wallet
 from app.schemas import WalletBase, WalletOut
@@ -31,7 +30,21 @@ async def update_wallet(telegram_id: str, wallet_data: WalletBase, db: AsyncSess
     wallet = result.scalar_one_or_none()
     if not wallet:
         raise HTTPException(status_code=404, detail="Wallet not found")
+    
     wallet.ton_wallet_address = wallet_data.ton_wallet_address
+    wallet.is_verified = wallet_data.is_verified
     await db.commit()
     await db.refresh(wallet)
     return wallet
+
+@router.get("/{telegram_id}/balance")
+async def get_wallet_balance(telegram_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Wallet).where(Wallet.telegram_id == telegram_id))
+    wallet = result.scalar_one_or_none()
+    if not wallet:
+        raise HTTPException(status_code=404, detail="Wallet not found")
+
+    return {
+        "ton_wallet_address": wallet.ton_wallet_address,
+        "is_verified": wallet.is_verified
+    }
