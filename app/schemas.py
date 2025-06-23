@@ -94,13 +94,19 @@ class FriendOut(FriendBase):
     invited_username: Optional[str] = None
 
 # ----- Wallet Schemas -----
-class WalletBase(BaseSchema):
+class WalletBase(BaseModel):
     telegram_id: str
     ton_wallet_address: str
+    is_verified: bool = False
+    balance: int = 0  # 👈 Ajout ici
 
 class WalletOut(WalletBase):
-    balance: Optional[float] = None
-    last_checked: Optional[datetime] = None
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        orm_mode = True
 
 # ----- Action Schemas -----
 class ActionBase(BaseSchema):
@@ -137,3 +143,17 @@ class MyActionOut(MyActionBase):
     id: int
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
+
+class WelcomeTaskBase(BaseModel):
+    telegram_id: str
+    task_name: str
+    completed: Optional[bool] = False
+    completed_at: Optional[datetime] = None
+
+class WelcomeTaskOut(WelcomeTaskBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True  # 🔁 Pour Pydantic v2 (remplace `orm_mode = True`)

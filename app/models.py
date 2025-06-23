@@ -115,6 +115,7 @@ class Wallet(Base, BaseMixin):
     telegram_id = Column(String(TELEGRAM_ID_LEN), ForeignKey("user_profiles.telegram_id", ondelete="CASCADE"), unique=True, nullable=False)
     ton_wallet_address = Column(String(128), unique=True, nullable=False)
     is_verified = Column(Boolean, default=False)
+    balance = Column(BigInteger, default=0, nullable=False)  # ← 👈 Ajoute ceci
 
     __table_args__ = (
         {'comment': 'User cryptocurrency wallet information'},
@@ -159,3 +160,19 @@ class UserStatus(Base, BaseMixin):
     __table_args__ = (
         {'comment': 'Current user status and activity information'},
     )
+
+# ✅ CORRECT : en dehors de toute autre classe
+class WelcomeTask(Base, BaseMixin):
+    __tablename__ = "welcome_tasks"
+
+    telegram_id = Column(String(TELEGRAM_ID_LEN), ForeignKey("user_profiles.telegram_id", ondelete="CASCADE"), index=True, nullable=False)
+    task_name = Column(String(100), nullable=False)
+    completed = Column(Boolean, default=False)
+    completed_at = Column(DateTime)
+
+    __table_args__ = (
+        Index('idx_welcome_task_user', 'telegram_id'),
+        {'comment': 'Welcome tasks (onboarding) completed by users'},
+    )
+
+    user = relationship("UserProfile", backref="welcome_tasks")

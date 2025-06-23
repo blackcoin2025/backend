@@ -5,6 +5,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
+from app.routers import welcom  # 👈 import du nouveau routeur
+from app.routers import quotidien
 
 from app.database import Base
 from app.routers import (
@@ -71,6 +73,8 @@ app.include_router(actions.router, prefix="/actions", tags=["Actions"])
 app.include_router(status.router, prefix="/status", tags=["Status"])
 app.include_router(myactions.router, prefix="/myactions", tags=["MyActions"])
 app.include_router(auth.router)  # déjà taggé avec /auth dans le router lui-même
+app.include_router(quotidien.router)
+app.include_router(welcom.router, prefix="/welcome", tags=["Welcome"])  # ✅ ajouté ici
 
 # 🔗 Endpoint racine
 @app.get("/")
