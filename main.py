@@ -3,11 +3,9 @@ import asyncio
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from app.routers import welcom  # 👈 import du nouveau routeur
-from app.routers import quotidien
-
 from app.database import Base
 from app.routers import (
     auth,
@@ -21,6 +19,8 @@ from app.routers import (
     actions,
     status,
     myactions,
+    quotidien,
+    welcom,
 )
 
 # 🔄 Chargement des variables d’environnement
@@ -52,7 +52,10 @@ app = FastAPI(
 )
 
 # 🌍 Middleware CORS
-origins = ["https://blackcoin-v5-frontend.vercel.app"]
+origins = [
+    "https://blackcoin-v5-frontend.vercel.app",
+    "https://staging-blackcoin.vercel.app",
+]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -74,12 +77,23 @@ app.include_router(status.router, prefix="/status", tags=["Status"])
 app.include_router(myactions.router, prefix="/myactions", tags=["MyActions"])
 app.include_router(auth.router)  # déjà taggé avec /auth dans le router lui-même
 app.include_router(quotidien.router)
-app.include_router(welcom.router, prefix="/welcome", tags=["Welcome"])  # ✅ ajouté ici
+app.include_router(welcom.router, prefix="/welcome", tags=["Welcome"])
 
 # 🔗 Endpoint racine
 @app.get("/")
 async def read_root():
     return {"message": "Welcome to the BlackCoin API!"}
+
+# 🌐 Middleware pour capturer les exceptions globales
+@app.middleware("http")
+async def catch_exceptions_middleware(request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as exc:
+        return JSONResponse(
+            status_code=500,
+            content={"message": "An unexpected error occurred.", "details": str(exc)},
+        )
 
 # 🚀 Création des tables à l'initialisation
 @app.on_event("startup")

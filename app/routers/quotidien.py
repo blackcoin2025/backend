@@ -1,5 +1,3 @@
-# app/routers/quotidien.py
-
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -10,6 +8,13 @@ from app.models import UserProfile as User
 
 router = APIRouter(prefix="/daily", tags=["Daily Reward"])
 
+def calculate_streak(last_claim_time, now):
+    """Calcule si le streak doit être incrémenté ou réinitialisé."""
+    if last_claim_time:
+        diff = now - last_claim_time
+        if timedelta(hours=24) <= diff < timedelta(hours=48):
+            return True  # Streak continue
+    return False  # Streak réinitialisé
 
 @router.get("/streak/{telegram_id}")
 async def get_daily_streak(telegram_id: int, db: AsyncSession = Depends(get_db)):
@@ -47,12 +52,8 @@ async def claim_daily_reward(telegram_id: int, db: AsyncSession = Depends(get_db
         raise HTTPException(status_code=400, detail="Récompense déjà réclamée aujourd'hui")
 
     # Met à jour le streak
-    if user.last_claim_time:
-        diff = now - user.last_claim_time
-        if timedelta(hours=24) <= diff < timedelta(hours=48):
-            user.daily_streak += 1
-        else:
-            user.daily_streak = 1
+    if calculate_streak(user.last_claim_time, now):
+        user.daily_streak += 1
     else:
         user.daily_streak = 1
 
@@ -60,7 +61,12 @@ async def claim_daily_reward(telegram_id: int, db: AsyncSession = Depends(get_db
     user.points += reward_points
     user.last_claim_time = now
 
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Erreur lors de la mise à jour du streak")
+
     return {
         "message": f"{reward_points} points ajoutés !",
         "streak": user.daily_streak,
