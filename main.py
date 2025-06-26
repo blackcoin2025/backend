@@ -1,57 +1,43 @@
+# main.py
+
 import os
-import asyncio
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.orm import sessionmaker
 from app.database import Base
-from app.routers import (
-    auth,
-    user,
-    balance,
-    level,
-    ranking,
-    tasks,
-    friends,
-    wallet,
-    actions,
-    status,
-    myactions,
-    quotidien,
-    welcom,
-)
+from app.routers import telegram as auth  # ⚠️ important : alias
 
-# 🔄 Chargement des variables d’environnement
+# 🔄 Charger .env
 load_dotenv()
 
-# 🔑 Récupération de l'URL de la base de données
+# 📦 DB config
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
-    raise ValueError("❌ La variable DATABASE_URL est manquante dans le fichier .env")
+    raise ValueError("❌ DATABASE_URL manquant dans .env")
 
-# ✅ Adaptation pour un moteur async
 if DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-# ⚙️ Moteur SQLAlchemy async
+# 🔌 SQLAlchemy
 engine = create_async_engine(DATABASE_URL, echo=True)
-AsyncSessionLocal = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+AsyncSessionLocal = sessionmaker(bind=engine, class_='AsyncSession', expire_on_commit=False)
 
-# 📌 Création asynchrone des tables
+# 🛠 Création des tables
 async def init_models():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-# 🚀 Initialisation FastAPI
+# 🚀 Init FastAPI
 app = FastAPI(
-    title="BlackCoin API",
-    description="Backend for managing user data, profiles, and activities",
+    title="BlackCoin Auth API",
+    description="API d'authentification via Telegram",
     version="1.0.0",
 )
 
-# 🌍 Middleware CORS
+# 🌍 CORS
 origins = [
     "https://blackcoin-v5-frontend.vercel.app",
     "https://staging-blackcoin.vercel.app",
@@ -64,27 +50,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 🧩 Inclusion des routers
-app.include_router(user.router, prefix="/user", tags=["User"])
-app.include_router(balance.router, prefix="/balance", tags=["Balance"])
-app.include_router(level.router, prefix="/level", tags=["Level"])
-app.include_router(ranking.router, prefix="/ranking", tags=["Ranking"])
-app.include_router(tasks.router, prefix="/tasks", tags=["Tasks"])
-app.include_router(friends.router, prefix="/friends", tags=["Friends"])
-app.include_router(wallet.router, prefix="/wallet", tags=["Wallet"])
-app.include_router(actions.router, prefix="/actions", tags=["Actions"])
-app.include_router(status.router, prefix="/status", tags=["Status"])
-app.include_router(myactions.router, prefix="/myactions", tags=["MyActions"])
-app.include_router(auth.router)  # déjà taggé avec /auth dans le router lui-même
-app.include_router(quotidien.router)
-app.include_router(welcom.router, prefix="/welcome", tags=["Welcome"])
+# 🔗 Routeur unique : Auth
+app.include_router(auth.router)
 
-# 🔗 Endpoint racine
+# ✅ Healthcheck
 @app.get("/")
-async def read_root():
-    return {"message": "Welcome to the BlackCoin API!"}
+async def root():
+    return {"message": "API d'authentification prête."}
 
-# 🌐 Middleware pour capturer les exceptions globales
+# 🛡 Middleware global d’erreur
 @app.middleware("http")
 async def catch_exceptions_middleware(request, call_next):
     try:
@@ -92,10 +66,10 @@ async def catch_exceptions_middleware(request, call_next):
     except Exception as exc:
         return JSONResponse(
             status_code=500,
-            content={"message": "An unexpected error occurred.", "details": str(exc)},
+            content={"message": "Erreur serveur inattendue", "details": str(exc)},
         )
 
-# 🚀 Création des tables à l'initialisation
+# 📅 Créer les tables à l'init
 @app.on_event("startup")
 async def on_startup():
     await init_models()
