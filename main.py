@@ -1,14 +1,12 @@
-# main.py
-
 import os
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession  # ✅ Import correct
 from sqlalchemy.orm import sessionmaker
 from app.database import Base
-from app.routers import telegram as auth  # ⚠️ important : alias
+from app.routers import telegram as auth  # ✅ alias
 
 # 🔄 Charger .env
 load_dotenv()
@@ -23,7 +21,7 @@ if DATABASE_URL.startswith("postgresql://"):
 
 # 🔌 SQLAlchemy
 engine = create_async_engine(DATABASE_URL, echo=True)
-AsyncSessionLocal = sessionmaker(bind=engine, class_='AsyncSession', expire_on_commit=False)
+AsyncSessionLocal = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)  # ✅ correction ici
 
 # 🛠 Création des tables
 async def init_models():
