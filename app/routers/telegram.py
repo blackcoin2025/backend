@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -9,32 +10,34 @@ from app.services.telegram_auth import verify_telegram_auth_data
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
-# 🎁 Bonus et configuration
+# 🎁 Configuration des bonus
 WELCOME_BONUS = 1000
 CHANNEL_BONUS = 1000
-BONUS_SPLIT = 0.5  # 50% vers balance, 50% vers wallet
-
+BONUS_SPLIT = 0.5  # 50% dans Balance, 50% dans Wallet
 
 @router.post("/telegram", response_model=UserOut)
-async def auth_telegram(data: TelegramAuthRequest, db: AsyncSession = Depends(get_db)):
-    # 1. Vérifier que les données viennent bien de Telegram
+async def auth_telegram(
+    data: TelegramAuthRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    # 1️⃣ Vérifier que les données viennent bien de Telegram
     if not verify_telegram_auth_data(data):
         raise HTTPException(status_code=401, detail="Données Telegram invalides.")
 
-    # 2. Vérifier si l'utilisateur existe déjà
+    # 2️⃣ Vérifier si l'utilisateur existe déjà
     result = await db.execute(select(User).where(User.telegram_id == data.telegram_id))
     user = result.scalar_one_or_none()
 
     if user:
-        return user  # Utilisateur déjà enregistré → on le renvoie simplement
+        return jsonable_encoder(user) | {"isNew": False}
 
-    # 3. Nouvel utilisateur → Création + Bonus de bienvenue + Bonus canal
+    # 3️⃣ Nouvel utilisateur → Création
     user = User(**data.model_dump())
     db.add(user)
     await db.commit()
     await db.refresh(user)
 
-    # --- BONUS DE BIENVENUE ---
+    # 4️⃣ Création des ressources associées (balance, wallet, etc.)
     welcome_balance = int(WELCOME_BONUS * BONUS_SPLIT)
     welcome_wallet = WELCOME_BONUS - welcome_balance
 
@@ -45,12 +48,11 @@ async def auth_telegram(data: TelegramAuthRequest, db: AsyncSession = Depends(ge
 
     db.add_all([balance, wallet, level, ranking])
 
-    # --- BONUS POUR AVOIR REJOINT LE CANAL TELEGRAM ---
+    # 5️⃣ Tâche bonus : rejoindre le canal Telegram
     task_reward = CHANNEL_BONUS
     task_balance = int(task_reward * BONUS_SPLIT)
     task_wallet = task_reward - task_balance
 
-    # Marquer la tâche "rejoindre le canal" comme faite
     join_task = Task(
         telegram_id=user.telegram_id,
         task_name="Join Telegram Channel",
@@ -59,7 +61,7 @@ async def auth_telegram(data: TelegramAuthRequest, db: AsyncSession = Depends(ge
     )
     db.add(join_task)
 
-    # Mise à jour du solde, niveau et classement avec le bonus canal
+    # Mise à jour des ressources avec le bonus
     balance.points += task_balance
     wallet.task_earnings += task_wallet
     level.experience += task_balance
@@ -68,4 +70,4 @@ async def auth_telegram(data: TelegramAuthRequest, db: AsyncSession = Depends(ge
     await db.commit()
     await db.refresh(user)
 
-    return user
+    return jsonable_encoder(user) | {"isNew": True}
