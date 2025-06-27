@@ -3,15 +3,18 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession  # ✅ Import correct
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from app.database import Base
-from app.routers import telegram as auth  # ✅ alias
+from app.models import UserProfile
+print("✅ Modèle UserProfile importé : ", UserProfile.__tablename__)
+from app.routers import telegram as auth
 
-# 🔄 Charger .env
+
+# Charger les variables d'environnement
 load_dotenv()
 
-# 📦 DB config
+# Config base de données
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("❌ DATABASE_URL manquant dans .env")
@@ -19,27 +22,31 @@ if not DATABASE_URL:
 if DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-# 🔌 SQLAlchemy
+# Config SQLAlchemy
 engine = create_async_engine(DATABASE_URL, echo=True)
-AsyncSessionLocal = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)  # ✅ correction ici
+AsyncSessionLocal = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
-# 🛠 Création des tables
+# Fonction d'initialisation des tables
 async def init_models():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        tables = Base.metadata.tables.keys()
+        print("📦 Tables détectées par SQLAlchemy :", list(tables))
 
-# 🚀 Init FastAPI
+# Création de l'app FastAPI
 app = FastAPI(
     title="BlackCoin Auth API",
     description="API d'authentification via Telegram",
     version="1.0.0",
 )
 
-# 🌍 CORS
+# Middleware CORS
 origins = [
+    "http://localhost:5173",
     "https://blackcoin-v5-frontend.vercel.app",
     "https://staging-blackcoin.vercel.app",
 ]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -48,15 +55,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 🔗 Routeur unique : Auth
+# Inclusion du routeur Telegram (auth)
 app.include_router(auth.router)
 
-# ✅ Healthcheck
+# Endpoint Healthcheck
 @app.get("/")
 async def root():
     return {"message": "API d'authentification prête."}
 
-# 🛡 Middleware global d’erreur
+# Middleware global de gestion des erreurs
 @app.middleware("http")
 async def catch_exceptions_middleware(request, call_next):
     try:
@@ -67,7 +74,7 @@ async def catch_exceptions_middleware(request, call_next):
             content={"message": "Erreur serveur inattendue", "details": str(exc)},
         )
 
-# 📅 Créer les tables à l'init
+# Création des tables au démarrage de l'app
 @app.on_event("startup")
 async def on_startup():
     await init_models()

@@ -1,5 +1,4 @@
 import os
-from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
@@ -32,7 +31,6 @@ class Base(DeclarativeBase):
     pass
 
 # 🔌 Dépendance FastAPI pour injecter une session DB
-@asynccontextmanager
 async def get_db():
     async with AsyncSessionLocal() as session:
         yield session
