@@ -1,4 +1,5 @@
 import os
+import traceback
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,7 +40,7 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# ✅ CORS (à ajuster selon tes besoins en prod)
+# ✅ Middleware CORS
 origins = [
     "http://localhost:5173",
     "https://blackcoin-v5-frontend.vercel.app",
@@ -54,20 +55,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ✅ Inclusion des routes
-app.include_router(auth.router)
-
-# ✅ Health check
-@app.get("/")
-async def root():
-    return {"message": "API d'authentification prête."}
-
-# ✅ Middleware global pour attraper les erreurs serveur
+# ✅ Middleware global pour attraper les erreurs serveur avec traceback
 @app.middleware("http")
 async def catch_exceptions_middleware(request: Request, call_next):
     try:
         return await call_next(request)
     except Exception as exc:
+        traceback_str = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        print("🔴 Traceback erreur :\n", traceback_str)
         return JSONResponse(
             status_code=500,
             content={"message": "Erreur serveur inattendue", "details": str(exc)},
@@ -81,7 +76,15 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         content={"detail": exc.errors()},
     )
 
-# ✅ Création automatique des tables au démarrage
+# ✅ Endpoint de test simple
+@app.get("/")
+async def root():
+    return {"message": "API d'authentification prête."}
+
+# ✅ Inclusion des routes Telegram
+app.include_router(auth.router)
+
+# ✅ Démarrage : création automatique des tables
 @app.on_event("startup")
 async def on_startup():
     await init_models()
