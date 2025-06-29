@@ -1,55 +1,48 @@
-# app/routers/telegram.py
-
-from fastapi import APIRouter, HTTPException, Depends
-from fastapi.encoders import jsonable_encoder
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
+from app.services.telegram_auth import verify_telegram_auth_data
+from app.models import UserProfile
+from app.database import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-
-from app.database import get_db  # fonction dépendance qui fournit AsyncSession
-from app.models import UserProfile
-from app.schemas import TelegramAuthData, TelegramAuthRequest, UserOut
-from app.services.telegram_auth import verify_telegram_auth_data  # ta fonction de vérif
+from fastapi import Depends
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
+# Modèle qui représente le data complet Telegram initData (extrait ce qui est envoyé par Telegram)
+class TelegramInitData(BaseModel):
+    auth_date: int
+    hash: str
+    user: dict
 
-@router.post("/telegram", response_model=UserOut)
-async def auth_telegram(data: TelegramAuthData, db: AsyncSession = Depends(get_db)):
-    # 🔐 Vérifie la signature Telegram
+@router.post("/telegram/init")
+async def telegram_init(data: TelegramInitData, db: AsyncSession = Depends(get_db)):
+    # 1. Vérifier la signature
     if not verify_telegram_auth_data(data):
         raise HTTPException(status_code=401, detail="Données Telegram invalides.")
+    
+    # 2. Extraire user info
+    user_info = data.user
+    telegram_id = str(user_info["id"])
+    
+    # 3. Chercher utilisateur en base
+    result = await db.execute(select(UserProfile).where(UserProfile.telegram_id == telegram_id))
+    user = result.scalar_one_or_none()
 
-    # 📦 Préparation des données pour la base
-    request_data = TelegramAuthRequest(
-        telegram_id=str(data.id),
-        first_name=data.first_name,
-        last_name=data.last_name,
-        username=data.username,
-        photo_url=data.photo_url,
+    if user:
+        # Utilisateur existant
+        return {"isNew": False, "user": user}
+    
+    # 4. Sinon, créer nouvel utilisateur
+    new_user = UserProfile(
+        telegram_id=telegram_id,
+        first_name=user_info.get("first_name"),
+        last_name=user_info.get("last_name"),
+        username=user_info.get("username"),
+        photo_url=user_info.get("photo_url"),
     )
+    db.add(new_user)
+    await db.commit()
+    await db.refresh(new_user)
 
-    try:
-        # 🔍 Vérifie si l'utilisateur existe
-        result = await db.execute(
-            select(UserProfile).where(UserProfile.telegram_id == request_data.telegram_id)
-        )
-        user = result.scalar_one_or_none()
-
-        if user:
-            print("👤 Utilisateur déjà existant :", user.telegram_id)
-            # Retourner formaté + ajouter isNew = False dans json encodé
-            return jsonable_encoder(user) | {"isNew": False}
-
-        # 🆕 Création d'un nouvel utilisateur
-        user = UserProfile(**request_data.dict())
-        db.add(user)
-        await db.commit()
-        await db.refresh(user)
-        print("✅ Nouvel utilisateur créé :", user.telegram_id)
-        # Retourner formaté + ajouter isNew = True dans json encodé
-        return jsonable_encoder(user) | {"isNew": True}
-
-    except Exception as e:
-        await db.rollback()
-        print("❌ Erreur lors de la création de l'utilisateur :", str(e))
-        raise HTTPException(status_code=500, detail=f"Erreur SQL : {str(e)}")
+    return {"isNew": True, "user": new_user}
