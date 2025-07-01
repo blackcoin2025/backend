@@ -4,6 +4,7 @@ from typing import Dict, Any
 import os
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+print("TELEGRAM_BOT_TOKEN from env:", BOT_TOKEN)
 
 def verify_telegram_auth_data(data: Dict[str, Any]) -> bool:
     """
@@ -38,5 +39,10 @@ def verify_telegram_auth_data(data: Dict[str, Any]) -> bool:
     check_string = "\n".join(f"{k}={v}" for k, v in sorted(fields.items()))
 
     calculated_hash = hmac.new(secret_key, check_string.encode(), hashlib.sha256).hexdigest()
+
+    # Logs pour débogage
+    print("Check string:", repr(check_string))
+    print("Calculated hash:", calculated_hash)
+    print("Provided hash:", data['hash'])
 
     return hmac.compare_digest(calculated_hash, data['hash'])
