@@ -1,34 +1,30 @@
-# ✅ telegram.py
 from fastapi import APIRouter, HTTPException, Depends
 from app.services.telegram_auth import verify_telegram_auth_data
 from app.models import UserProfile
 from app.database import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from app.schemas import TelegramInitData, UserOut
+from urllib.parse import parse_qsl
+from app.schemas import UserOut
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
 @router.post("/telegram/init")
-async def telegram_init(data: TelegramInitData, db: AsyncSession = Depends(get_db)):
-    auth_data = {
-        "id": data.user.id,
-        "first_name": data.user.first_name,
-        "last_name": data.user.last_name,
-        "username": data.user.username,
-        "photo_url": data.user.photo_url,
-        "auth_date": data.auth_date,
-        "hash": data.hash
-    }
+async def telegram_init(payload: dict, db: AsyncSession = Depends(get_db)):
+    init_data = payload.get("initData")
+    if not init_data:
+        raise HTTPException(status_code=400, detail="initData manquant")
 
-    # 1. Vérifier la signature Telegram
+    # Convertit initData (ex: "id=...&first_name=...") en dict
+    auth_data = dict(parse_qsl(init_data, keep_blank_values=True))
+
     if not verify_telegram_auth_data(auth_data):
         raise HTTPException(status_code=401, detail="Signature Telegram invalide")
 
-    telegram_id = str(data.user.id)
+    telegram_id = auth_data["id"]
 
     try:
-        # 2. Vérifier si utilisateur existe
+        # 1. Recherche de l’utilisateur
         result = await db.execute(select(UserProfile).where(UserProfile.telegram_id == telegram_id))
         user = result.scalar_one_or_none()
 
@@ -38,13 +34,13 @@ async def telegram_init(data: TelegramInitData, db: AsyncSession = Depends(get_d
                 "user": UserOut.model_validate(user)
             }
 
-        # 3. Créer un nouvel utilisateur
+        # 2. Création du nouvel utilisateur
         new_user = UserProfile(
             telegram_id=telegram_id,
-            first_name=data.user.first_name,
-            last_name=data.user.last_name,
-            username=data.user.username,
-            photo_url=data.user.photo_url,
+            first_name=auth_data.get("first_name"),
+            last_name=auth_data.get("last_name"),
+            username=auth_data.get("username"),
+            photo_url=auth_data.get("photo_url"),
         )
 
         db.add(new_user)
