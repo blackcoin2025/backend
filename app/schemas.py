@@ -17,3 +17,12 @@ class UserOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+class TelegramAuthData(BaseModel):
+    id: int
+    username: Optional[str] = None
+    first_name: str
+    last_name: Optional[str] = None
+    photo_url: Optional[str] = None
+    auth_date: int
+    hash: str
