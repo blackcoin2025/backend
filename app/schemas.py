@@ -1,4 +1,4 @@
-#✅ schemas.py
+# ✅ schemas.py
 from pydantic import BaseModel
 from typing import Optional
 
@@ -14,13 +14,6 @@ class TelegramInitData(BaseModel):
     hash: str
     user: TelegramUserData
 
-class TelegramAuthRequest(BaseModel):
-    telegram_id: str
-    first_name: str
-    last_name: Optional[str] = None
-    username: Optional[str] = None
-    photo_url: Optional[str] = None
-
 class UserOut(BaseModel):
     telegram_id: str
     first_name: str
@@ -30,3 +23,8 @@ class UserOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+# ✅ nouveau : réponse enrichie
+class TelegramAuthResponse(BaseModel):
+    isNew: bool
+    user: UserOut
