@@ -44,6 +44,6 @@ def verify_telegram_auth_data(data: Dict[str, Any]) -> bool:
     print("Check string:", repr(check_string))
     print("Calculated hash:", calculated_hash)
     print("Provided hash:", data['hash'])
-    print("🔐 BOT TOKEN ACTIF :", settings.TELEGRAM_BOT_TOKEN)
+    print("🔐 BOT TOKEN ACTIF :", os.environ.get("TELEGRAM_BOT_TOKEN"))
 
     return hmac.compare_digest(calculated_hash, data['hash'])
