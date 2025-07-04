@@ -1,49 +1,40 @@
-import hashlib
-import hmac
-from typing import Dict, Any
 import os
+import hmac
+import hashlib
+from dotenv import load_dotenv
 
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-print("TELEGRAM_BOT_TOKEN from env:", BOT_TOKEN)
+load_dotenv()
 
-def verify_telegram_auth_data(data: Dict[str, Any]) -> bool:
-    """
-    Vérifie la validité des données d'authentification Telegram via le hash HMAC SHA256.
-    Args:
-        data: Dictionnaire contenant les données Telegram reçues
-    Returns:
-        bool: True si signature valide, False sinon
-    """
-    if not BOT_TOKEN:
-        raise ValueError("TELEGRAM_BOT_TOKEN manquant dans .env")
-
-    required_keys = ['auth_date', 'hash', 'id']
-    if not all(k in data for k in required_keys):
+def verify_telegram_auth_data(auth_data: dict) -> bool:
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not bot_token:
+        print("❌ TELEGRAM_BOT_TOKEN non trouvé")
         return False
 
-    if not data.get('hash'):
+    # Récupérer le hash envoyé par Telegram
+    received_hash = auth_data.get("hash")
+    if not received_hash:
+        print("❌ Hash manquant dans la requête")
         return False
 
-    secret_key = hashlib.sha256(BOT_TOKEN.encode()).digest()
+    # Enlever le hash du dictionnaire pour ne pas le signer
+    auth_data_copy = {k: v for k, v in auth_data.items() if k != "hash"}
 
-    # Construire la chaîne check_string triée par clé (clé=valeur, séparées par \n)
-    fields = {
-        "auth_date": str(data['auth_date']),
-        "id": str(data['id']),
-    }
-    optional_fields = ['first_name', 'last_name', 'username', 'photo_url']
-    for field in optional_fields:
-        if field in data and data[field]:
-            fields[field] = data[field]
+    # Trier les clés et construire le data_check_string
+    data_check_string = '\n'.join(
+        [f"{k}={auth_data_copy[k]}" for k in sorted(auth_data_copy)]
+    )
 
-    check_string = "\n".join(f"{k}={v}" for k, v in sorted(fields.items()))
+    # Générer le secret key à partir du token
+    secret_key = hashlib.sha256(bot_token.encode()).digest()
 
-    calculated_hash = hmac.new(secret_key, check_string.encode(), hashlib.sha256).hexdigest()
+    # Calculer le hash avec HMAC
+    calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
 
-    # Logs pour débogage
-    print("Check string:", repr(check_string))
-    print("Calculated hash:", calculated_hash)
-    print("Provided hash:", data['hash'])
-    print("🔐 BOT TOKEN ACTIF :", os.environ.get("TELEGRAM_BOT_TOKEN"))
+    # Debug prints
+    print("🔐 BOT TOKEN ACTIF :", bot_token)
+    print("🔎 Check string:", repr(data_check_string))
+    print("✅ Calculated hash:", calculated_hash)
+    print("📥 Provided hash:", received_hash)
 
-    return hmac.compare_digest(calculated_hash, data['hash'])
+    return calculated_hash == received_hash
