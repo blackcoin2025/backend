@@ -5,33 +5,34 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-def verify_telegram_auth_data(auth_data: dict) -> bool:
+def verify_telegram_auth_data(payload: dict) -> bool:
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not bot_token:
         print("❌ TELEGRAM_BOT_TOKEN non trouvé")
         return False
 
-    # Récupérer le hash envoyé par Telegram
-    received_hash = auth_data.get("hash")
+    # ➜ Aplatir les données depuis le payload brut
+    auth_data = payload.get("user", {}).copy()
+    auth_data["auth_date"] = payload.get("auth_date")
+    received_hash = payload.get("hash")
+
     if not received_hash:
-        print("❌ Hash manquant dans la requête")
+        print("❌ Hash manquant")
         return False
 
-    # Enlever le hash du dictionnaire pour ne pas le signer
+    # Supprimer le hash du dict pour éviter de l’inclure dans le calcul
     auth_data_copy = {k: v for k, v in auth_data.items() if k != "hash"}
 
-    # Trier les clés et construire le data_check_string
-    data_check_string = '\n'.join(
-        [f"{k}={auth_data_copy[k]}" for k in sorted(auth_data_copy)]
+    # Créer la check string triée
+    data_check_string = "\n".join(
+        f"{k}={auth_data_copy[k]}" for k in sorted(auth_data_copy)
     )
 
-    # Générer le secret key à partir du token
+    # Hash HMAC
     secret_key = hashlib.sha256(bot_token.encode()).digest()
-
-    # Calculer le hash avec HMAC
     calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
 
-    # Debug prints
+    # Logs pour debug
     print("🔐 BOT TOKEN ACTIF :", bot_token)
     print("🔎 Check string:", repr(data_check_string))
     print("✅ Calculated hash:", calculated_hash)
