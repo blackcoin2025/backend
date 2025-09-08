@@ -2,16 +2,14 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 from jose import jwt, JWTError
 import os
-from dotenv import load_dotenv
 from fastapi import HTTPException, status
 
 # -------------------------------
-# Charger les variables d'environnement
+# Variables d'environnement (injectées par Render)
 # -------------------------------
-load_dotenv()
 SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
-    raise ValueError("SECRET_KEY est manquant dans le fichier .env")
+    raise ValueError("SECRET_KEY est manquant dans les variables d'environnement")
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60))
