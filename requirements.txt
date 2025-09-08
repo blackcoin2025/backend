@@ -1,16 +1,14 @@
 fastapi
-uvicorn[standard]
-sqlalchemy[asyncio]
-asyncpg
-psycopg2-binary
+uvicorn
 python-dotenv
+sqlalchemy
+psycopg2-binary
+pydantic
+aiogram
 email-validator
-pydantic[email]
-passlib[bcrypt]
-httpx
-passlib[bcrypt]
-python-jose[cryptography]
+uvicorn[standard]
+fastapi
+uvicorn
+psycopg2
 requests
-
-
 
