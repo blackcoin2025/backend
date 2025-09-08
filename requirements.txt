@@ -9,3 +9,5 @@ pydantic>=2.4,<2.9
 requests
 uvicorn[standard]
 passlib[bcrypt]
+python-jose[cryptography]
+
