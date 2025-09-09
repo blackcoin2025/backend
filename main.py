@@ -7,8 +7,6 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from hashlib import sha256
-import hmac
 
 from app.database import engine, Base, AsyncSessionLocal
 from app.services.addtasks import add_sample_tasks
@@ -30,7 +28,7 @@ logger = logging.getLogger("uvicorn.error")
 ENVIRONMENT = os.getenv("BACKEND_ENV", "development").lower()
 IS_PROD = ENVIRONMENT == "production"
 
-# Sources autorisées
+# Seules ces sources sont autorisées
 ALLOWED_SOURCES = ["telegram", "my_app"]
 
 # -----------------------
@@ -49,8 +47,8 @@ origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:3000",
-    "https://blackcoin-v5-frontend.vercel.app",
-    "https://t.me",
+    "https://blackcoin-v5-frontend.vercel.app",  # ton frontend Vercel
+    "https://t.me",  # Telegram WebApp
 ]
 
 app.add_middleware(
@@ -62,46 +60,17 @@ app.add_middleware(
 )
 
 # -----------------------
-# Vérification Telegram initData
-# -----------------------
-def verify_telegram_init_data(init_data: str) -> bool:
-    """
-    Vérifie l'authenticité du initData Telegram WebApp.
-    ⚠️ Doit correspondre à ton bot token côté serveur.
-    """
-    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-    if not bot_token:
-        logger.error("Telegram bot token manquant")
-        return False
-
-    # Telegram envoie initData sous forme de query string
-    data_dict = dict(item.split("=", 1) for item in init_data.split("&") if "=" in item)
-    check_string = "\n".join(f"{k}={v}" for k, v in sorted(data_dict.items()) if k != "hash")
-    secret_key = sha256(bot_token.encode()).digest()
-    hmac_hash = hmac.new(secret_key, check_string.encode(), sha256).hexdigest()
-    return hmac_hash == data_dict.get("hash")
-
-# -----------------------
-# Middleware : vérification source
+# Middleware : blocage des accès non autorisés
 # -----------------------
 @app.middleware("http")
 async def check_source(request: Request, call_next):
-    # Ignorer les routes publiques
-    if request.url.path.startswith("/static") or request.url.path.startswith("/ping"):
-        return await call_next(request)
-
-    source = request.headers.get("X-Access-Source", "").lower()
+    source = request.headers.get("X-Access-Source")
     if source not in ALLOWED_SOURCES:
         logger.warning(f"❌ Requête bloquée - Source interdite: {source}")
-        return JSONResponse(status_code=403, content={"detail": "Accès interdit : source non autorisée"})
+        raise HTTPException(status_code=403, detail="Accès interdit : source non autorisée")
 
-    if source == "telegram":
-        init_data = request.headers.get("X-Telegram-InitData", "")
-        if not init_data or not verify_telegram_init_data(init_data):
-            logger.warning("❌ Requête Telegram invalide ou initData manquant")
-            return JSONResponse(status_code=403, content={"detail": "Accès interdit : Telegram initData invalide"})
-
-    return await call_next(request)
+    response = await call_next(request)
+    return response
 
 # -----------------------
 # Inclusion des routes
@@ -128,7 +97,10 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     logger.exception("Erreur inattendue :")
-    return JSONResponse(status_code=500, content={"detail": "Erreur interne du serveur", "error": str(exc)})
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Erreur interne du serveur", "error": str(exc)}
+    )
 
 # -----------------------
 # Startup : création des tables et pré-remplissage
