@@ -2,14 +2,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import logging
-import os
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.database import engine, Base, AsyncSessionLocal
+from app.database import engine, Base
 from app.services.addtasks import add_sample_tasks
+from app.database import AsyncSessionLocal
 from app.routes import welcome, wallet, balance, user_profile, mining, minhistory, tasks
 from app.routers import auth, auth_login, friends
 
@@ -21,15 +21,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger("uvicorn.error")
-
-# -----------------------
-# Configuration de l'environnement
-# -----------------------
-ENVIRONMENT = os.getenv("BACKEND_ENV", "development").lower()
-IS_PROD = ENVIRONMENT == "production"
-
-# Seules ces sources sont autorisées
-ALLOWED_SOURCES = ["telegram", "my_app"]
 
 # -----------------------
 # Création de l'application FastAPI
@@ -47,8 +38,7 @@ origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:3000",
-    "https://blackcoin-v5-frontend.vercel.app",  # ton frontend Vercel
-    "https://t.me",  # Telegram WebApp
+    "https://blackcoin-v5-frontend.vercel.app"
 ]
 
 app.add_middleware(
@@ -58,19 +48,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# -----------------------
-# Middleware : blocage des accès non autorisés
-# -----------------------
-@app.middleware("http")
-async def check_source(request: Request, call_next):
-    source = request.headers.get("X-Access-Source")
-    if source not in ALLOWED_SOURCES:
-        logger.warning(f"❌ Requête bloquée - Source interdite: {source}")
-        raise HTTPException(status_code=403, detail="Accès interdit : source non autorisée")
-
-    response = await call_next(request)
-    return response
 
 # -----------------------
 # Inclusion des routes
@@ -109,9 +86,11 @@ async def global_exception_handler(request: Request, exc: Exception):
 async def startup():
     logger.info("⚡ Vérification et création des tables si nécessaire...")
     async with engine.begin() as conn:
+        # Crée toutes les tables définies dans Base si elles n'existent pas
         await conn.run_sync(Base.metadata.create_all)
     logger.info("✅ Tables créées ou déjà existantes.")
 
+    # Pré-remplir les tâches si nécessaire
     async with AsyncSessionLocal() as session:
         await add_sample_tasks(session)
         logger.info("✅ Tâches par défaut ajoutées si elles n'existaient pas.")
