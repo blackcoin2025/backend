@@ -52,7 +52,7 @@ app.add_middleware(
 # -----------------------
 # Inclusion des routes
 # -----------------------
-app.include_router(auth.router, prefix="/auth", tags=["Authentification"])
+app.include_router(auth.router)
 app.include_router(auth_login.router, prefix="/auth", tags=["Connexion"])
 app.include_router(user_profile.router, prefix="/user-data", tags=["Utilisateurs"])
 app.include_router(welcome.router)

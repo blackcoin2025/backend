@@ -125,10 +125,11 @@ class UserTask(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
+    started_at = Column(DateTime, nullable=True)     # ⬅️ Quand l’utilisateur clique "Commencer"
     completed = Column(Boolean, default=False, nullable=False)
     completed_at = Column(DateTime)
     created_at = Column(DateTime, server_default=func.now())
-
+    
 
 class Status(Base):
     __tablename__ = "status"

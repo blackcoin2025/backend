@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import List
 from pydantic import BaseModel
+from datetime import datetime
 
 from app.database import get_async_session
 from app.models import Task, UserTask, User
@@ -13,10 +14,11 @@ from app.services.balance_service import credit_balance
 from app.services.wallet_service import add_wallet_points
 
 router = APIRouter(
-    prefix="",  # défini dans main.py (ex: /tasks)
-    tags=["Tasks"]
+    tags=["Tasks"]  # ✅ aucun prefix ici
 )
 
+# Durée minimale (en secondes) avant validation
+TASK_MIN_DURATION = 120
 
 # ------------------------
 # Schéma pour la validation
@@ -24,41 +26,28 @@ router = APIRouter(
 class ValidateTaskRequest(BaseModel):
     code: str
 
-
 # ------------------------
-# 1. Liste des vidéos (tâches disponibles)
+# 1. Liste de toutes les tâches disponibles
 # ------------------------
 @router.get("/", response_model=List[TaskSchema])
-@router.get("", response_model=List[TaskSchema])
 async def get_all_tasks(db: AsyncSession = Depends(get_async_session)):
-    """Retourne toutes les tâches (vidéos) disponibles."""
     result = await db.execute(select(Task))
     return result.scalars().all()
 
-
 # ------------------------
-# 2. Validation d’une tâche par code
+# 2. Démarrage d’une tâche
 # ------------------------
-@router.post("/{task_id}/validate")
-async def validate_task(
+@router.post("/{task_id}/start")
+async def start_task(
     task_id: int,
-    payload: ValidateTaskRequest,
     db: AsyncSession = Depends(get_async_session),
     current_user: User = Depends(get_current_user)
 ):
-    """Vérifie le code d’une tâche, marque comme complétée et crédite les points."""
-
-    # Récupération de la tâche
     result = await db.execute(select(Task).where(Task.id == task_id))
     task = result.scalars().first()
     if not task:
         raise HTTPException(status_code=404, detail="Tâche non trouvée")
 
-    # Vérification du code
-    if task.validation_code != payload.code:
-        raise HTTPException(status_code=400, detail="Code invalide")
-
-    # Vérifier si déjà complétée
     result = await db.execute(
         select(UserTask).where(
             UserTask.user_id == current_user.id,
@@ -67,19 +56,66 @@ async def validate_task(
     )
     user_task = result.scalars().first()
 
-    if user_task and user_task.completed:
-        raise HTTPException(status_code=400, detail="Tâche déjà complétée")
-
-    # Créer ou mettre à jour UserTask
     if not user_task:
         user_task = UserTask(
             user_id=current_user.id,
             task_id=task_id,
-            completed=True
+            started_at=datetime.utcnow()
         )
         db.add(user_task)
     else:
-        user_task.completed = True
+        user_task.started_at = datetime.utcnow()
+
+    await db.commit()
+    await db.refresh(user_task)
+
+    return {
+        "message": "⏳ Tâche démarrée",
+        "task_id": task_id,
+        "started_at": user_task.started_at
+    }
+
+# ------------------------
+# 3. Validation d’une tâche par code
+# ------------------------
+@router.post("/{task_id}/validate")
+async def validate_task(
+    task_id: int,
+    payload: ValidateTaskRequest,
+    db: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user)
+):
+    result = await db.execute(select(Task).where(Task.id == task_id))
+    task = result.scalars().first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Tâche non trouvée")
+
+    if task.validation_code != payload.code:
+        raise HTTPException(status_code=400, detail="Code invalide")
+
+    result = await db.execute(
+        select(UserTask).where(
+            UserTask.user_id == current_user.id,
+            UserTask.task_id == task_id
+        )
+    )
+    user_task = result.scalars().first()
+
+    if not user_task or not user_task.started_at:
+        raise HTTPException(status_code=400, detail="Tâche non démarrée")
+    if user_task.completed:
+        raise HTTPException(status_code=400, detail="Tâche déjà complétée")
+
+    elapsed = (datetime.utcnow() - user_task.started_at).total_seconds()
+    if elapsed < TASK_MIN_DURATION:
+        raise HTTPException(
+            status_code=400,
+            detail=f"⏱ Vous devez encore attendre {TASK_MIN_DURATION - int(elapsed)} secondes"
+        )
+
+    # Validation
+    user_task.completed = True
+    user_task.completed_at = datetime.utcnow()
 
     # Répartition des points
     total_points = task.reward_points
@@ -109,16 +145,14 @@ async def validate_task(
         }
     }
 
-
 # ------------------------
-# 3. Nombre de tâches complétées par utilisateur
+# 4. Nombre de tâches complétées par utilisateur
 # ------------------------
 @router.get("/me/completed-count")
 async def get_completed_tasks_count(
     db: AsyncSession = Depends(get_async_session),
     current_user: User = Depends(get_current_user)
 ):
-    """Retourne le nombre total de tâches accomplies par l’utilisateur."""
     result = await db.execute(
         select(UserTask).where(
             UserTask.user_id == current_user.id,
@@ -128,30 +162,48 @@ async def get_completed_tasks_count(
     completed_tasks = result.scalars().all()
     return {"user_id": current_user.id, "completed_tasks": len(completed_tasks)}
 
-
 # ------------------------
-# 4. Liste des tâches non encore validées par l’utilisateur
+# 5. Liste des tâches non encore validées par l’utilisateur
 # ------------------------
-@router.get("/me", response_model=List[TaskSchema])
+@router.get("/me/pending")
 async def get_my_pending_tasks(
     db: AsyncSession = Depends(get_async_session),
     current_user: User = Depends(get_current_user)
 ):
-    """Retourne uniquement les tâches que l’utilisateur n’a pas encore complétées."""
-    # Toutes les tâches
     result = await db.execute(select(Task))
     all_tasks = result.scalars().all()
 
-    # Tâches déjà complétées par l’utilisateur
-    result = await db.execute(
-        select(UserTask.task_id).where(
-            UserTask.user_id == current_user.id,
-            UserTask.completed == True
+    pending_tasks = []
+    for task in all_tasks:
+        result = await db.execute(
+            select(UserTask).where(
+                UserTask.user_id == current_user.id,
+                UserTask.task_id == task.id
+            )
         )
-    )
-    completed_task_ids = {task_id for task_id, in result.all()}
+        user_task = result.scalars().first()
 
-    # Filtrer pour ne garder que celles non complétées
-    pending_tasks = [task for task in all_tasks if task.id not in completed_task_ids]
+        completed = False
+        started_at = None
+        time_left = 0
+
+        if user_task:
+            completed = user_task.completed
+            started_at = user_task.started_at
+            if user_task.started_at and not user_task.completed:
+                elapsed = (datetime.utcnow() - user_task.started_at).total_seconds()
+                time_left = max(0, TASK_MIN_DURATION - int(elapsed))
+
+        if not completed:  # On exclut les tâches déjà validées
+            pending_tasks.append({
+                "id": task.id,
+                "title": task.title,
+                "description": task.description,
+                "link": task.link,
+                "reward_points": task.reward_points,
+                "completed": completed,
+                "started_at": started_at.isoformat() if started_at else None,
+                "time_left": time_left
+            })
 
     return pending_tasks

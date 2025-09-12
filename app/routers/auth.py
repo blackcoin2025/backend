@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
+# app/routers/auth.py
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request, Response, Cookie
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -12,13 +13,18 @@ from app.models import PendingUser, User, PromoCode, Friend
 from app.database import get_async_session
 from app.services.VerifyEmail import generate_code, send_verification_email, pwd_context
 from app.schemas import VerificationSchema
-from app.utils.token import create_access_token
+from app.utils.token import create_access_token, create_refresh_token, verify_refresh_token
 from app.utils.auth_utils import get_user_by_email
 from app.services.rewards import reward_referrer
 from app.dependencies.auth import get_current_user
-from app.utils.cookies import set_access_token_cookie   # ✅ import depuis utils
+from app.utils.handler import (
+    set_access_token_cookie,
+    set_refresh_token_cookie,
+    clear_access_token_cookie,
+    refresh_tokens
+)
 
-router = APIRouter()
+router = APIRouter(prefix="/auth", tags=["Auth"])
 
 ACCESS_TOKEN_EXPIRE_MINUTES = 15
 
@@ -152,11 +158,14 @@ async def verify_email(
     # Vérification utilisateur existant
     existing_user = await get_user_by_email(db, data.email)
     if existing_user:
-        token = create_access_token({"sub": existing_user.email})
+        access_token = create_access_token({"sub": existing_user.email})
+        refresh_token = create_refresh_token({"sub": existing_user.email})
+
         response = JSONResponse(
             {"status": "success", "user": public_user_payload(existing_user)}
         )
-        set_access_token_cookie(response, token)
+        set_access_token_cookie(response, access_token)
+        set_refresh_token_cookie(response, refresh_token)
         return response
 
     # Vérifier utilisateur en attente
@@ -200,9 +209,12 @@ async def verify_email(
     await db.delete(pending)
     await db.commit()
 
-    token = create_access_token({"sub": user.email})
+    access_token = create_access_token({"sub": user.email})
+    refresh_token = create_refresh_token({"sub": user.email})
+
     response = JSONResponse({"status": "success", "user": public_user_payload(user)})
-    set_access_token_cookie(response, token)
+    set_access_token_cookie(response, access_token)
+    set_refresh_token_cookie(response, refresh_token)
     return response
 
 # ============================================================
@@ -223,5 +235,30 @@ async def get_me(request: Request, current_user: User = Depends(get_current_user
 @router.post("/logout")
 async def logout():
     response = JSONResponse({"status": "success", "detail": "Déconnecté"})
-    response.delete_cookie("access_token")
+    clear_access_token_cookie(response)
+    response.delete_cookie("refresh_token", path="/")
     return response
+
+# ============================================================
+# 🔹 Refresh Token
+# ============================================================
+
+@router.post("/refresh")
+async def refresh_token_endpoint(
+    response: Response,
+    refresh_token: str = Cookie(None),
+    db: AsyncSession = Depends(get_async_session)
+):
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="Refresh token manquant")
+
+    payload = verify_refresh_token(refresh_token)
+    email = payload.get("sub")
+
+    # Vérifier que l’utilisateur existe
+    result = await db.execute(select(User).where(User.email == email))
+    user = result.scalars().first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Utilisateur non trouvé")
+
+    return refresh_tokens(response, email)
