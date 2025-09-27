@@ -1,17 +1,20 @@
-from dotenv import load_dotenv
-load_dotenv()
-
+# main.py
+import os
 import logging
+from dotenv import load_dotenv
+
+load_dotenv()  # Charger le .env local si présent
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.database import engine, Base
+from app.database import engine, Base, AsyncSessionLocal
 from app.services.addtasks import add_sample_tasks
-from app.database import AsyncSessionLocal
-from app.routes import welcome, wallet, balance, user_profile, mining, minhistory, tasks
-from app.routers import auth, auth_login, friends
+from app.routes import welcome, wallet, balance, user_profile, mining, minhistory, tasks, tradegame
+from app.routers import auth, auth_login, friends, luckygame
+from app.utils import cookies
 
 # -----------------------
 # Configuration des logs
@@ -32,14 +35,11 @@ app = FastAPI(
 )
 
 # -----------------------
-# Configuration CORS
+# Configuration CORS depuis variable d'environnement
 # -----------------------
-origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:3000",
-    "https://blackcoin-v5-frontend.vercel.app"
-]
+# On s'attend à ce que la variable contienne une liste séparée par des virgules
+frontend_origins = os.getenv("FRONTEND_URLS", "")
+origins = [origin.strip() for origin in frontend_origins.split(",") if origin.strip()]
 
 app.add_middleware(
     CORSMiddleware,
@@ -59,6 +59,9 @@ app.include_router(welcome.router)
 app.include_router(wallet.router)
 app.include_router(balance.router)
 app.include_router(friends.router)
+app.include_router(luckygame.router)
+app.include_router(cookies.router)
+app.include_router(tradegame.router)
 app.include_router(mining.router, prefix="/mining", tags=["Mining"])
 app.include_router(minhistory.router, prefix="/minhistory", tags=["Historique Mining"])
 app.include_router(tasks.router, prefix="/tasks", tags=["Tâches"])
@@ -86,7 +89,6 @@ async def global_exception_handler(request: Request, exc: Exception):
 async def startup():
     logger.info("⚡ Vérification et création des tables si nécessaire...")
     async with engine.begin() as conn:
-        # Crée toutes les tables définies dans Base si elles n'existent pas
         await conn.run_sync(Base.metadata.create_all)
     logger.info("✅ Tables créées ou déjà existantes.")
 

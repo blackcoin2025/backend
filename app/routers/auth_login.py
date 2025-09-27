@@ -1,5 +1,3 @@
-# app/routes/auth_login.py
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,8 +7,8 @@ from app.database import get_async_session
 from app.models import User
 from app.schemas import LoginRequest
 from app.services.VerifyEmail import pwd_context
-from app.utils.token import create_access_token
-from app.utils.cookies import set_access_token_cookie  # ⚡ fonction utilitaire cookies
+from app.utils.token import create_access_token, create_refresh_token
+from app.utils.cookies import set_access_token_cookie, set_refresh_token_cookie
 
 router = APIRouter()
 
@@ -22,8 +20,8 @@ async def login_user(
 ):
     """
     Authentifie un utilisateur par email OU username + mot de passe.
-    Stocke le JWT dans un cookie HttpOnly sécurisé.
-    Retourne uniquement les infos utilisateur (pas le token).
+    Stocke les JWT (access + refresh) dans des cookies HttpOnly sécurisés.
+    Retourne uniquement les infos utilisateur (pas les tokens).
     """
 
     # ── 1) Validation des champs d'entrée
@@ -43,7 +41,7 @@ async def login_user(
             detail="Fournissez au moins l'email ou le nom d'utilisateur."
         )
 
-    # ── 2) Récupération de l'utilisateur (email OU username)
+    # ── 2) Récupération de l'utilisateur
     if email and username:
         query = select(User).where(or_(User.email == email, User.username == username))
     elif email:
@@ -61,24 +59,24 @@ async def login_user(
         )
 
     # Vérifie cohérence email + username si les deux sont fournis
-    if email and username:
-        if (user.email != email) or (user.username != username):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Identifiants invalides."
-            )
+    if email and username and (user.email != email or user.username != username):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Identifiants invalides."
+        )
 
-    # ── 3) Vérification mot de passe
+    # ── 3) Vérification du mot de passe
     if not pwd_context.verify(password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Identifiants invalides."
         )
 
-    # ── 4) Création du token JWT
-    token = create_access_token(data={"sub": user.email})
+    # ── 4) Création des tokens JWT
+    access_token = create_access_token(data={"sub": user.email})
+    refresh_token = create_refresh_token(data={"sub": user.email})
 
-    # ── 5) Réponse avec cookie (pas de token dans le JSON)
+    # ── 5) Préparer la réponse
     user_data = {
         "id": int(user.id),
         "first_name": user.first_name,
@@ -96,7 +94,8 @@ async def login_user(
         "message": "Connexion réussie."
     })
 
-    # ⚡ Ajoute le cookie sécurisé
-    set_access_token_cookie(response, token)
+    # ── 6) Ajout des cookies sécurisés
+    set_access_token_cookie(response, access_token)
+    set_refresh_token_cookie(response, refresh_token)
 
     return response

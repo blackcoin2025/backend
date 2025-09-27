@@ -17,11 +17,12 @@ from app.utils.token import create_access_token, create_refresh_token, verify_re
 from app.utils.auth_utils import get_user_by_email
 from app.services.rewards import reward_referrer
 from app.dependencies.auth import get_current_user
-from app.utils.handler import (
+from app.utils.cookies import (
     set_access_token_cookie,
     set_refresh_token_cookie,
+    refresh_tokens,
     clear_access_token_cookie,
-    refresh_tokens
+    clear_auth_cookies,
 )
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
