@@ -1,9 +1,8 @@
-# main.py
 import os
 import logging
 from dotenv import load_dotenv
 
-load_dotenv()  # Charger le .env local si présent
+load_dotenv()
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -17,7 +16,7 @@ from app.routers import auth, auth_login, friends, luckygame
 from app.utils import cookies
 
 # -----------------------
-# Configuration des logs
+# Configuration logs
 # -----------------------
 logging.basicConfig(
     level=logging.DEBUG,
@@ -26,7 +25,7 @@ logging.basicConfig(
 logger = logging.getLogger("uvicorn.error")
 
 # -----------------------
-# Création de l'application FastAPI
+# Création de l'app
 # -----------------------
 app = FastAPI(
     title="BlackCoin API",
@@ -35,22 +34,28 @@ app = FastAPI(
 )
 
 # -----------------------
-# Configuration CORS depuis variable d'environnement
+# CORS
 # -----------------------
-# On s'attend à ce que la variable contienne une liste séparée par des virgules
 frontend_origins = os.getenv("FRONTEND_URLS", "")
 origins = [origin.strip() for origin in frontend_origins.split(",") if origin.strip()]
+
+# Fallback dev
+if not origins:
+    logger.warning("⚠️ Aucune origine CORS définie. Fallback sur http://localhost:5173 (dev).")
+    origins = ["http://localhost:5173"]
+
+logger.info(f"🌍 CORS Origins autorisées : {origins}")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True,
+    allow_credentials=True,   # nécessaire pour les cookies JWT
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # -----------------------
-# Inclusion des routes
+# Inclusion routes
 # -----------------------
 app.include_router(auth.router)
 app.include_router(auth_login.router, prefix="/auth", tags=["Connexion"])
@@ -67,12 +72,12 @@ app.include_router(minhistory.router, prefix="/minhistory", tags=["Historique Mi
 app.include_router(tasks.router, prefix="/tasks", tags=["Tâches"])
 
 # -----------------------
-# Mount des fichiers statiques
+# Fichiers statiques
 # -----------------------
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # -----------------------
-# Gestion des erreurs globales
+# Gestion globale erreurs
 # -----------------------
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -83,22 +88,21 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 # -----------------------
-# Startup : création des tables et pré-remplissage
+# Startup
 # -----------------------
 @app.on_event("startup")
 async def startup():
-    logger.info("⚡ Vérification et création des tables si nécessaire...")
+    logger.info("⚡ Vérification des tables...")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    logger.info("✅ Tables créées ou déjà existantes.")
+    logger.info("✅ Tables OK")
 
-    # Pré-remplir les tâches si nécessaire
     async with AsyncSessionLocal() as session:
         await add_sample_tasks(session)
-        logger.info("✅ Tâches par défaut ajoutées si elles n'existaient pas.")
+        logger.info("✅ Tâches par défaut prêtes")
 
 # -----------------------
-# Route de test
+# Route test
 # -----------------------
 @app.get("/ping")
 async def ping():

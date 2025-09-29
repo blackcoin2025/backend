@@ -145,7 +145,12 @@ async def register_user(
     except Exception:
         pass
 
-    return {"status": "verification_sent", "detail": "Si l'email est valide, un code a été envoyé."}
+    return {
+    "status": "verification_sent",
+    "next": "verify_email",
+    "email": email,
+    "detail": "Un code de vérification a été envoyé à votre adresse e-mail."
+}
 
 # ============================================================
 # 🔹 Verify Email
