@@ -58,6 +58,10 @@ def public_user_payload(user: User) -> dict:
 # 🔹 Register
 # ============================================================
 
+# ============================================================
+# 🔹 Register (adapté pour retour direct du code)
+# ============================================================
+
 @router.post("/register", status_code=201)
 async def register_user(
     first_name: str = Form(...),
@@ -103,6 +107,7 @@ async def register_user(
     hashed_pwd = pwd_context.hash(password)
     code = generate_code()
     now = datetime.utcnow()
+    code_expiration_minutes = 5  # ⏳ code valable 5 minutes
 
     existing_pending = await db.execute(select(PendingUser).where(PendingUser.email == email))
     pending = existing_pending.scalars().first()
@@ -117,7 +122,7 @@ async def register_user(
         pending.avatar_url = avatar_url
         pending.password_hash = hashed_pwd
         pending.verification_code = code
-        pending.code_expires_at = now + timedelta(minutes=15)
+        pending.code_expires_at = now + timedelta(minutes=code_expiration_minutes)
         pending.created_at = now
         pending.promo_code_used = promo_code_clean
     else:
@@ -131,7 +136,7 @@ async def register_user(
             avatar_url=avatar_url,
             password_hash=hashed_pwd,
             verification_code=code,
-            code_expires_at=now + timedelta(minutes=15),
+            code_expires_at=now + timedelta(minutes=code_expiration_minutes),
             is_verified=False,
             created_at=now,
             promo_code_used=promo_code_clean
@@ -140,20 +145,25 @@ async def register_user(
 
     await db.commit()
 
-    try:
-        send_verification_email(email, code)
-    except Exception:
-        pass
-
-    return {
-    "status": "verification_sent",
-    "next": "verify_email",
-    "email": email,
-    "detail": "Un code de vérification a été envoyé à votre adresse e-mail."
-}
+    # ⚠️ plus d'envoi de mail → on renvoie directement au frontend
+    return JSONResponse(
+    content={
+        "status": "verification_sent",  # 🔹 aligne avec le frontend
+        "next": "verify_email",
+        "email": email,
+        "verification_code": code,
+        "expires_in": code_expiration_minutes * 60,
+        "detail": "Code de vérification généré (affiché côté frontend)."
+    },
+    status_code=201
+)
 
 # ============================================================
 # 🔹 Verify Email
+# ============================================================
+
+# ============================================================
+# 🔹 Verify Email (inchangé sauf wording)
 # ============================================================
 
 @router.post("/verify-email")
