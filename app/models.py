@@ -118,6 +118,7 @@ class Task(Base):
     reward_amount = Column(Integer, default=0, nullable=False)
     is_daily = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
+    logo = Column(String(100), nullable=True)  # ✅ nom ou clé du logo que le front va utiliser
 
 class UserTask(Base):
     __tablename__ = "user_tasks"

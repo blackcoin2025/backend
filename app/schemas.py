@@ -101,6 +101,7 @@ class TaskBase(BaseModel):
     reward_points: int
     reward_amount: int
     is_daily: bool = False
+    logo: Optional[str] = None   # ✅ on ajoute logo dans la base commune
 
 
 class TaskSchema(TaskBase):

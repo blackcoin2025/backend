@@ -200,6 +200,7 @@ async def get_my_pending_tasks(
                 "title": task.title,
                 "description": task.description,
                 "link": task.link,
+                "logo": task.logo,  # ✅ ajouté ici
                 "reward_points": task.reward_points,
                 "completed": completed,
                 "started_at": started_at.isoformat() if started_at else None,

@@ -10,7 +10,13 @@ def generate_code(length: int = 4) -> str:
     return ''.join(random.choice(chars) for _ in range(length))
 
 
-async def add_task(db: AsyncSession, title: str, link: str, reward_points: int = 100) -> Task:
+async def add_task(
+    db: AsyncSession,
+    title: str,
+    link: str,
+    reward_points: int = 100,
+    logo: str | None = None
+) -> Task:
     """
     Ajoute une nouvelle tâche (ex: vidéo YouTube, TikTok, etc.)
     """
@@ -18,7 +24,8 @@ async def add_task(db: AsyncSession, title: str, link: str, reward_points: int =
         title=title,
         link=link,
         reward_points=reward_points,
-        validation_code=generate_code()
+        validation_code=generate_code(),
+        logo=logo  # ✅ on insère le logo
     )
     db.add(task)
     await db.commit()
@@ -36,16 +43,16 @@ async def add_sample_tasks(db: AsyncSession):
         print("⚡ La table des tâches contient déjà des données.")
         return
 
+    # ✅ Ajout du logo pour chaque tâche
     sample_tasks = [
-        ("Telegram", "https://t.me/blackcoin202", 1000),
-        ("Facebook", "https://www.facebook.com/share/1BxkwKdPZL/", 1000),
-        ("Twitter", "https://x.com/BlackcoinON", 1000),
-        ("YouTube", "https://www.youtube.com/@Blackcoinchaine", 1000),
-        ("TikTok", "https://www.tiktok.com/@blackcoinsecurity", 1000),
+        ("Telegram", "https://t.me/blackcoin202", 1000, "telegram.png"),
+        ("Facebook", "https://www.facebook.com/share/1BxkwKdPZL/", 1000, "facebook.png"),
+        ("Twitter", "https://x.com/BlackcoinON", 1000, "twitter.png"),
+        ("YouTube", "https://www.youtube.com/@Blackcoinchaine", 1000, "youtube.png"),
+        ("TikTok", "https://www.tiktok.com/@blackcoinsecurity", 1000, "tiktok.png"),
     ]
 
-
-    for title, link, points in sample_tasks:
-        await add_task(db, title=title, link=link, reward_points=points)
+    for title, link, points, logo in sample_tasks:
+        await add_task(db, title=title, link=link, reward_points=points, logo=logo)
 
     print("✅ Tâches par défaut ajoutées avec succès !")
