@@ -30,12 +30,20 @@ class CashoutRequest(BaseModel):
 # Utils
 # ----------------------
 def generate_multipliers(level: int):
-    base_multipliers = [0, 0.3, 0.5, 1, 1.5, 2, 3, 5, 10, 50, 100, 1000]
-    probabilities = [0.3, 0.25, 0.15, 0.1, 0.07, 0.05, 0.03, 0.02, 0.015, 0.008, 0.005, 0.002]
+    base_multipliers = [0, 0.2, 0.5, 1, 1.5, 2, 3, 5, 10, 25, 50, 100]
+    probabilities =   [0.03, 0.07, 0.15, 0.20, 0.18, 0.12, 0.09, 0.07, 0.05, 0.025, 0.01, 0.005]
 
-    difficulty_factor = 1 + (level // 5) * 0.5
-    adjusted_probabilities = [max(p / difficulty_factor, 0.0001) for p in probabilities]
+    # Effet "progression" → plus on monte en niveau, plus les grosses valeurs deviennent accessibles
+    progression_boost = min(level * 0.01, 0.2)  # max +20% sur les fortes récompenses
 
+    adjusted_probabilities = []
+    for i, p in enumerate(probabilities):
+        if base_multipliers[i] >= 5:  # Boost uniquement pour les gros gains
+            adjusted_probabilities.append(p + progression_boost * p)
+        else:
+            adjusted_probabilities.append(p)
+
+    # Normaliser
     total = sum(adjusted_probabilities)
     adjusted_probabilities = [p / total for p in adjusted_probabilities]
 

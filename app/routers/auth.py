@@ -11,7 +11,7 @@ from typing import Optional
 
 from app.models import PendingUser, User, PromoCode, Friend
 from app.database import get_async_session
-from app.services.VerifyEmail import generate_code, send_verification_email, pwd_context
+from app.services.VerifyEmail import generate_code, pwd_context
 from app.schemas import VerificationSchema
 from app.utils.token import create_access_token, create_refresh_token, verify_refresh_token
 from app.utils.auth_utils import get_user_by_email
@@ -22,21 +22,31 @@ from app.utils.cookies import (
     set_refresh_token_cookie,
     refresh_tokens,
     clear_access_token_cookie,
-    clear_auth_cookies,
 )
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
 ACCESS_TOKEN_EXPIRE_MINUTES = 15
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
 # ============================================================
-# ✅ Utils locaux
+# ✅ Utils
 # ============================================================
 
 def ensure_static_uploads_dir() -> str:
     base = os.path.join("static", "uploads")
     os.makedirs(base, exist_ok=True)
     return base
+
+def make_public_url(path: Optional[str]) -> Optional[str]:
+    """Transforme une URL relative (/static/uploads/...) en URL absolue (BACKEND_URL)."""
+    if not path:
+        return None
+    if path.startswith("http"):
+        return path
+    if path.startswith("/"):
+        return f"{BACKEND_URL}{path}"
+    return f"{BACKEND_URL}/{path}"
 
 def public_user_payload(user: User) -> dict:
     return {
@@ -45,7 +55,7 @@ def public_user_payload(user: User) -> dict:
         "username": user.username,
         "first_name": user.first_name,
         "last_name": user.last_name,
-        "avatar_url": user.avatar_url,
+        "avatar_url": make_public_url(user.avatar_url),
         "is_verified": user.is_verified,
         "phone": getattr(user, "phone", None),
         "has_completed_welcome_tasks": user.has_completed_welcome_tasks,
@@ -56,10 +66,6 @@ def public_user_payload(user: User) -> dict:
 
 # ============================================================
 # 🔹 Register
-# ============================================================
-
-# ============================================================
-# 🔹 Register (adapté pour retour direct du code)
 # ============================================================
 
 @router.post("/register", status_code=201)
@@ -97,6 +103,7 @@ async def register_user(
         content = await avatar.read()
         with open(path, "wb") as f:
             f.write(content)
+        # ✅ Toujours sauver en relatif, mais stocker pour rendu public
         avatar_url = f"/static/uploads/{filename}"
 
     try:
@@ -107,7 +114,7 @@ async def register_user(
     hashed_pwd = pwd_context.hash(password)
     code = generate_code()
     now = datetime.utcnow()
-    code_expiration_minutes = 5  # ⏳ code valable 5 minutes
+    code_expiration_minutes = 5
 
     existing_pending = await db.execute(select(PendingUser).where(PendingUser.email == email))
     pending = existing_pending.scalars().first()
@@ -145,25 +152,20 @@ async def register_user(
 
     await db.commit()
 
-    # ⚠️ plus d'envoi de mail → on renvoie directement au frontend
     return JSONResponse(
-    content={
-        "status": "verification_sent",  # 🔹 aligne avec le frontend
-        "next": "verify_email",
-        "email": email,
-        "verification_code": code,
-        "expires_in": code_expiration_minutes * 60,
-        "detail": "Code de vérification généré (affiché côté frontend)."
-    },
-    status_code=201
-)
+        content={
+            "status": "verification_sent",
+            "next": "verify_email",
+            "email": email,
+            "verification_code": code,
+            "expires_in": code_expiration_minutes * 60,
+            "detail": "Code de vérification généré (affiché côté frontend)."
+        },
+        status_code=201
+    )
 
 # ============================================================
 # 🔹 Verify Email
-# ============================================================
-
-# ============================================================
-# 🔹 Verify Email (inchangé sauf wording)
 # ============================================================
 
 @router.post("/verify-email")
@@ -171,7 +173,7 @@ async def verify_email(
     data: VerificationSchema,
     db: AsyncSession = Depends(get_async_session)
 ):
-    # Vérification utilisateur existant
+    # Vérification utilisateur déjà créé
     existing_user = await get_user_by_email(db, data.email)
     if existing_user:
         access_token = create_access_token({"sub": existing_user.email})
@@ -185,9 +187,7 @@ async def verify_email(
         return response
 
     # Vérifier utilisateur en attente
-    result = await db.execute(
-        select(PendingUser).where(PendingUser.email == data.email)
-    )
+    result = await db.execute(select(PendingUser).where(PendingUser.email == data.email))
     pending = result.scalars().first()
     if not pending:
         raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
@@ -196,6 +196,9 @@ async def verify_email(
     if datetime.utcnow() > pending.code_expires_at:
         raise HTTPException(status_code=400, detail="Code expiré")
 
+    # ✅ Reconstruit l’URL publique
+    avatar_final = make_public_url(pending.avatar_url)
+
     user = User(
         email=pending.email,
         first_name=pending.first_name,
@@ -203,7 +206,7 @@ async def verify_email(
         birth_date=pending.birth_date,
         phone=pending.phone,
         username=pending.username,
-        avatar_url=pending.avatar_url,
+        avatar_url=avatar_final,
         password_hash=pending.password_hash,
         is_verified=True,
         has_completed_welcome_tasks=False
@@ -234,14 +237,11 @@ async def verify_email(
     return response
 
 # ============================================================
-# 🔹 Get Current User (/auth/me)
+# 🔹 Get Current User
 # ============================================================
 
 @router.get("/me")
 async def get_me(request: Request, current_user: User = Depends(get_current_user)):
-    print("🚀 Headers reçus :", request.headers)
-    access_token = request.cookies.get("access_token")
-    print("🚀 Cookie access_token reçu :", access_token)
     return {"status": "success", "user": public_user_payload(current_user)}
 
 # ============================================================
@@ -271,7 +271,6 @@ async def refresh_token_endpoint(
     payload = verify_refresh_token(refresh_token)
     email = payload.get("sub")
 
-    # Vérifier que l’utilisateur existe
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalars().first()
     if not user:

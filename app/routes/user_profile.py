@@ -12,7 +12,10 @@ from app.dependencies.auth import get_current_user
 from app.models import User
 from app.schemas import UserOut
 
-router = APIRouter()
+# ✅ Récupérer la variable d'environnement pour l'URL du backend
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+
+router = APIRouter(prefix="/users", tags=["Users"])
 
 
 @router.get("/me", response_model=UserOut)
@@ -51,7 +54,7 @@ async def update_profile(
     Met à jour les informations de profil de l'utilisateur connecté, y compris la photo de profil.
     """
 
-    # Mise à jour des champs
+    # 🔹 Mise à jour des champs texte
     if first_name:
         current_user.first_name = first_name
     if last_name:
@@ -61,10 +64,11 @@ async def update_profile(
     if birth_date:
         current_user.birth_date = birth_date
 
-    # Gestion de la photo de profil
+    # 🔹 Gestion de la photo de profil
     if avatar:
         extension = os.path.splitext(avatar.filename)[1]
         unique_filename = f"{uuid4().hex}{extension}"
+
         upload_dir = "static/avatars"
         os.makedirs(upload_dir, exist_ok=True)
 
@@ -72,8 +76,8 @@ async def update_profile(
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(avatar.file, buffer)
 
-        # Stocke l’URL relative (adaptable pour Vercel/CDN)
-        current_user.avatar_url = f"/{file_path}"
+        # ✅ Génère une URL publique complète
+        current_user.avatar_url = f"{BACKEND_URL}/static/avatars/{unique_filename}"
 
     await db.commit()
     await db.refresh(current_user)
