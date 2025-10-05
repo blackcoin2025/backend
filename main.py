@@ -15,6 +15,9 @@ from app.routes import welcome, wallet, balance, user_profile, mining, minhistor
 from app.routers import auth, auth_login, friends, luckygame
 from app.utils import cookies
 
+# 👉 Import de ton router actions
+from app.routes import actions  
+
 # -----------------------
 # Configuration logs
 # -----------------------
@@ -70,6 +73,9 @@ app.include_router(tradegame.router)
 app.include_router(mining.router, prefix="/mining", tags=["Mining"])
 app.include_router(minhistory.router, prefix="/minhistory", tags=["Historique Mining"])
 app.include_router(tasks.router, prefix="/tasks", tags=["Tâches"])
+
+# 👉 Ajout du router Actions
+app.include_router(actions.router)
 
 # -----------------------
 # Fichiers statiques

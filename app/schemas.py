@@ -1,9 +1,15 @@
 from pydantic import BaseModel, EmailStr, Field, field_validator
-from datetime import date
+from datetime import date, datetime
 from typing import Optional, List
+from pydantic import BaseModel, Field
+from typing import Optional, List, Literal
 from datetime import datetime
+from typing import List
+from enum import Enum
 
-
+# -----------------------
+# Auth / Register
+# -----------------------
 class RegisterRequest(BaseModel):
     first_name: str = Field(..., min_length=2, max_length=50)
     last_name: str = Field(..., min_length=2, max_length=50)
@@ -41,6 +47,7 @@ class LoginRequest(BaseModel):
     username: Optional[str] = None
     password: str
 
+
 class EmailRequestSchema(BaseModel):
     email: EmailStr
 
@@ -59,6 +66,9 @@ class VerificationSchema(BaseModel):
     code: str
 
 
+# -----------------------
+# Tasks
+# -----------------------
 class CompleteTasksRequest(BaseModel):
     user_id: int
     total_points: int
@@ -71,6 +81,7 @@ class ReferralFriend(BaseModel):
 class PromoCodeResponse(BaseModel):
     promo_code: Optional[str]
     referrals: List[ReferralFriend]
+
 
 class AddMiningPayload(BaseModel):
     user_id: int
@@ -91,6 +102,7 @@ class AddMiningResponse(BaseModel):
     level: int
     history_id: int
 
+
 # -----------------------
 # Task Schema
 # -----------------------
@@ -101,7 +113,7 @@ class TaskBase(BaseModel):
     reward_points: int
     reward_amount: int
     is_daily: bool = False
-    logo: Optional[str] = None   # ✅ on ajoute logo dans la base commune
+    logo: Optional[str] = None   # ✅ logo dans la base commune
 
 
 class TaskSchema(TaskBase):
@@ -131,6 +143,10 @@ class UserTaskSchema(UserTaskBase):
         "from_attributes": True
     }
 
+
+# -----------------------
+# User Schema
+# -----------------------
 class UserOut(BaseModel):
     id: int
     first_name: Optional[str]
@@ -146,3 +162,69 @@ class UserOut(BaseModel):
         "from_attributes": True,
         "populate_by_name": True
     }
+
+
+# -----------------------------
+# Enums pour Pydantic (str) 
+# -----------------------------
+class ActionCategoryEnum(str, Enum):
+    finance = "finance"
+    immobilier = "immobilier"
+    opportunite = "opportunite"
+
+
+class ActionTypeEnum(str, Enum):
+    individuelle = "individuelle"
+    commune = "commune"
+
+
+class ActionStatusEnum(str, Enum):
+    disponible = "disponible"
+    complet = "complet"
+    retire = "retire"
+
+
+# -----------------------------
+# Action Schemas
+# -----------------------------
+class ActionBase(BaseModel):
+    name: str
+    category: ActionCategoryEnum
+    type: ActionTypeEnum = ActionTypeEnum.individuelle
+    total_parts: int
+    price_per_part: float
+
+
+class ActionSchema(ActionBase):
+    id: int
+    status: ActionStatusEnum = ActionStatusEnum.disponible
+    created_at: datetime
+
+    model_config = {
+        "from_attributes": True  # 🔹 Convertit automatiquement les attributs SQLAlchemy
+    }
+
+
+# -----------------------------
+# UserAction Schemas
+# -----------------------------
+class UserActionBase(BaseModel):
+    action_id: int
+    quantity: int
+    amount: float
+
+
+class UserActionSchema(UserActionBase):
+    id: int
+    timestamp: datetime
+
+    model_config = {
+        "from_attributes": True
+    }
+
+
+# -----------------------------
+# Liste des actions d'un utilisateur
+# -----------------------------
+class UserActionsList(BaseModel):
+    actions: List[UserActionSchema]

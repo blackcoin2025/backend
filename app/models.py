@@ -1,8 +1,9 @@
-from sqlalchemy import Column, String, Integer, Date, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, String, Integer, Date, Boolean, DateTime, ForeignKey, Enum, Float
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.database import Base
 from datetime import datetime
+import enum
 
 # -----------------------------
 # Utilisateurs en attente
@@ -49,8 +50,9 @@ class User(Base):
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    # 🔥 Relation avec MiningHistory
+    # Relations
     mining_histories = relationship("MiningHistory", back_populates="user", cascade="all, delete-orphan")
+    user_actions = relationship("UserAction", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User {self.email}>"
@@ -112,13 +114,14 @@ class Task(Base):
     id = Column(Integer, primary_key=True)
     title = Column(String(100), nullable=False)
     description = Column(String(500))
-    link = Column(String(255), nullable=False)   # ✅ lien de la tâche (vidéo, etc.)
-    validation_code = Column(String(10), nullable=False)  # ✅ code de validation
+    link = Column(String(255), nullable=False)
+    validation_code = Column(String(10), nullable=False)
     reward_points = Column(Integer, default=0, nullable=False)
     reward_amount = Column(Integer, default=0, nullable=False)
     is_daily = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
-    logo = Column(String(100), nullable=True)  # ✅ nom ou clé du logo que le front va utiliser
+    logo = Column(String(100), nullable=True)
+
 
 class UserTask(Base):
     __tablename__ = "user_tasks"
@@ -126,11 +129,11 @@ class UserTask(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
-    started_at = Column(DateTime, nullable=True)     # ⬅️ Quand l’utilisateur clique "Commencer"
+    started_at = Column(DateTime, nullable=True)
     completed = Column(Boolean, default=False, nullable=False)
     completed_at = Column(DateTime)
     created_at = Column(DateTime, server_default=func.now())
-    
+
 
 class Status(Base):
     __tablename__ = "status"
@@ -179,3 +182,58 @@ class DailyCheckIn(Base):
     date = Column(Date, nullable=False)
     streak = Column(Integer, default=1, nullable=False)
     last_checkin = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+# -----------------------------
+# Enums pour les Actions
+# -----------------------------
+class ActionType(enum.Enum):
+    individuelle = "individuelle"
+    commune = "commune"
+
+
+class ActionStatus(enum.Enum):
+    disponible = "disponible"
+    complet = "complet"
+    retire = "retire"
+
+
+class ActionCategory(enum.Enum):
+    finance = "finance"
+    immobilier = "immobilier"
+    opportunite = "opportunite"
+
+
+# -----------------------------
+# Actions sur le marché
+# -----------------------------
+class Action(Base):
+    __tablename__ = "actions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(150), nullable=False)
+    category = Column(Enum(ActionCategory), nullable=False)
+    type = Column(Enum(ActionType), default=ActionType.individuelle)
+    total_parts = Column(Integer, default=1)
+    price_per_part = Column(Float, nullable=False)
+    status = Column(Enum(ActionStatus), default=ActionStatus.disponible)
+    created_at = Column(DateTime, server_default=func.now())
+
+    buyers = relationship("UserAction", back_populates="action", cascade="all, delete-orphan")
+
+
+# -----------------------------
+# Parts achetées par les utilisateurs
+# -----------------------------
+class UserAction(Base):
+    __tablename__ = "user_actions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    action_id = Column(Integer, ForeignKey("actions.id", ondelete="CASCADE"), nullable=False)
+    quantity = Column(Integer, nullable=False)
+    amount = Column(Float, nullable=False)
+    timestamp = Column(DateTime, server_default=func.now())
+
+    action = relationship("Action", back_populates="buyers")
+    user = relationship("User", back_populates="user_actions")
