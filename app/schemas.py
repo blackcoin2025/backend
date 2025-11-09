@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import List
 from enum import Enum
 
+
 # -----------------------
 # Auth / Register
 # -----------------------
@@ -164,9 +165,9 @@ class UserOut(BaseModel):
     }
 
 
-# -----------------------------
-# Enums pour Pydantic (str) 
-# -----------------------------
+# ============================================================
+# 🔹 ENUMS (chaînes de caractères)
+# ============================================================
 class ActionCategoryEnum(str, Enum):
     finance = "finance"
     immobilier = "immobilier"
@@ -184,15 +185,18 @@ class ActionStatusEnum(str, Enum):
     retire = "retire"
 
 
-# -----------------------------
-# Action Schemas
-# -----------------------------
+# ============================================================
+# 🔹 ACTION SCHEMAS
+# ============================================================
 class ActionBase(BaseModel):
     name: str
     category: ActionCategoryEnum
     type: ActionTypeEnum = ActionTypeEnum.individuelle
-    total_parts: int
+    total_parts: int = 1
     price_per_part: float
+    value_bkc: Optional[float] = None
+    image_url: Optional[str] = None
+    icon: Optional[str] = None
 
 
 class ActionSchema(ActionBase):
@@ -200,14 +204,12 @@ class ActionSchema(ActionBase):
     status: ActionStatusEnum = ActionStatusEnum.disponible
     created_at: datetime
 
-    model_config = {
-        "from_attributes": True  # 🔹 Convertit automatiquement les attributs SQLAlchemy
-    }
+    model_config = {"from_attributes": True}
 
 
-# -----------------------------
-# UserAction Schemas
-# -----------------------------
+# ============================================================
+# 🔹 USER ACTION SCHEMAS
+# ============================================================
 class UserActionBase(BaseModel):
     action_id: int
     quantity: int
@@ -218,13 +220,99 @@ class UserActionSchema(UserActionBase):
     id: int
     timestamp: datetime
 
-    model_config = {
-        "from_attributes": True
-    }
+    model_config = {"from_attributes": True}
 
 
-# -----------------------------
-# Liste des actions d'un utilisateur
-# -----------------------------
 class UserActionsList(BaseModel):
     actions: List[UserActionSchema]
+
+
+# ============================================================
+# 🔹 BONUS SCHEMAS
+# ============================================================
+class BonusStatus(str, Enum):
+    en_attente = "en_attente"
+    eligible = "eligible"
+    en_conversion = "en_conversion"
+    converti = "converti"
+    expire = "expire"
+
+
+class BonusBase(BaseModel):
+    total_points: int
+    points_restants: int
+    pourcentage_conversion: float
+    status: BonusStatus
+    raison: str
+
+
+class BonusCreate(BaseModel):
+    total_points: int = 5000
+    raison: str = "bonus_inscription"
+
+
+class BonusOut(BonusBase):
+    id: int
+    user_id: int
+    cree_le: datetime
+    converti_le: Optional[datetime] = None
+
+    class Config:
+        orm_mode = True
+
+
+# ============================================================
+# 🔹 USER PACK SCHEMAS (corrigés et enrichis)
+# ============================================================
+class UserPackSchema(BaseModel):
+    id: int
+    user_id: int
+    pack_id: int
+    start_date: Optional[datetime] = None
+    last_claim_date: Optional[datetime] = None
+    daily_earnings: float
+    total_earned: float = 0.0
+    is_unlocked: bool = False
+    pack_status: Optional[str] = "payé"  # ✅ ajouté ici — spécifique à l’utilisateur
+
+    # 🔸 Champs du modèle Action (pour affichage sur le frontend)
+    name: Optional[str] = None
+    category: Optional[ActionCategoryEnum] = None
+    type: Optional[ActionTypeEnum] = None
+    total_parts: Optional[int] = None
+    price_per_part: Optional[float] = None
+    value_bkc: Optional[float] = None
+    image_url: Optional[str] = None
+    status: Optional[ActionStatusEnum] = ActionStatusEnum.disponible  # ✅ statut global de l’action
+
+    model_config = {"from_attributes": True}
+
+
+# ============================================================
+# 🔹 PACK SCHEMAS (optionnels)
+# ============================================================
+class PackBase(BaseModel):
+    name: str
+    price: float
+    daily_reward: float
+    description: Optional[str] = None
+    video_links: Optional[List[str]] = []
+
+
+class PackSchema(PackBase):
+    id: int
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+    
+
+class UserDailyTaskSchema(BaseModel):
+    id: int
+    task_id: int
+    user_pack_id: int
+    completed: bool
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    class Config:
+        orm_mode = True    

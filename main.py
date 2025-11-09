@@ -1,4 +1,6 @@
+# app/main.py
 import os
+import asyncio
 import logging
 from dotenv import load_dotenv
 
@@ -11,12 +13,14 @@ from fastapi.staticfiles import StaticFiles
 
 from app.database import engine, Base, AsyncSessionLocal
 from app.services.addtasks import add_sample_tasks
-from app.routes import welcome, wallet, balance, user_profile, mining, minhistory, tasks, tradegame
+from app.tasks.reset_daily_tasks import start_daily_reset_task  # ✅ seul import correct
+
+from app.routes import (
+    welcome, wallet, balance, user_profile,
+    mining, minhistory, tasks, tradegame, bonus, actions
+)
 from app.routers import auth, auth_login, friends, luckygame
 from app.utils import cookies
-
-# 👉 Import de ton router actions
-from app.routes import actions  
 
 # -----------------------
 # Configuration logs
@@ -42,7 +46,6 @@ app = FastAPI(
 frontend_origins = os.getenv("FRONTEND_URLS", "")
 origins = [origin.strip() for origin in frontend_origins.split(",") if origin.strip()]
 
-# Fallback dev
 if not origins:
     logger.warning("⚠️ Aucune origine CORS définie. Fallback sur http://localhost:5173 (dev).")
     origins = ["http://localhost:5173"]
@@ -52,13 +55,13 @@ logger.info(f"🌍 CORS Origins autorisées : {origins}")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True,   # nécessaire pour les cookies JWT
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # -----------------------
-# Inclusion routes
+# Inclusion des routes
 # -----------------------
 app.include_router(auth.router)
 app.include_router(auth_login.router, prefix="/auth", tags=["Connexion"])
@@ -70,11 +73,10 @@ app.include_router(friends.router)
 app.include_router(luckygame.router)
 app.include_router(cookies.router)
 app.include_router(tradegame.router)
+app.include_router(bonus.router)
 app.include_router(mining.router, prefix="/mining", tags=["Mining"])
 app.include_router(minhistory.router, prefix="/minhistory", tags=["Historique Mining"])
 app.include_router(tasks.router, prefix="/tasks", tags=["Tâches"])
-
-# 👉 Ajout du router Actions
 app.include_router(actions.router)
 
 # -----------------------
@@ -83,7 +85,7 @@ app.include_router(actions.router)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # -----------------------
-# Gestion globale erreurs
+# Gestion globale des erreurs
 # -----------------------
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -98,18 +100,21 @@ async def global_exception_handler(request: Request, exc: Exception):
 # -----------------------
 @app.on_event("startup")
 async def startup():
-    logger.info("⚡ Vérification des tables...")
+    logger.info("⚡ Initialisation du serveur BlackCoin...")
+
+    # 1️⃣ Création des tables si elles n'existent pas
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    logger.info("✅ Tables OK")
+    logger.info("✅ Tables vérifiées")
 
+    # 2️⃣ Ajout des tâches par défaut
     async with AsyncSessionLocal() as session:
         await add_sample_tasks(session)
         logger.info("✅ Tâches par défaut prêtes")
 
-# -----------------------
-# Route test
-# -----------------------
-@app.get("/ping")
-async def ping():
-    return {"status": "ok", "message": "Backend opérationnel 🚀"}
+    # 3️⃣ Lancement du reset automatique
+    try:
+        asyncio.create_task(start_daily_reset_task())  # ✅ important !
+        logger.info("♻️ Tâche de reset quotidienne démarrée (5 min loop pour test).")
+    except Exception as e:
+        logger.error(f"❌ Impossible de lancer le reset quotidien : {e}")

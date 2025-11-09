@@ -1,9 +1,20 @@
-from sqlalchemy import Column, String, Integer, Date, Boolean, DateTime, ForeignKey, Enum, Float
+from sqlalchemy import (
+    Column,
+    String,
+    Integer,
+    Date,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Float,
+    Numeric,  # ✅ ajouté ici
+)
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
+from sqlalchemy.types import Enum as SqlEnum  # 👈 pour les enums SQLAlchemy
 from app.database import Base
 from datetime import datetime
-import enum
+import enum  # 👈 garde pour tes enums Python
 
 # -----------------------------
 # Utilisateurs en attente
@@ -50,9 +61,13 @@ class User(Base):
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    # Relations
+    # 🔧 Ajoute cette ligne :
+    wallet = relationship("Wallet", back_populates="user", uselist=False, cascade="all, delete-orphan")
+
+    # Relations existantes :
     mining_histories = relationship("MiningHistory", back_populates="user", cascade="all, delete-orphan")
     user_actions = relationship("UserAction", back_populates="user", cascade="all, delete-orphan")
+    packs = relationship("UserPack", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User {self.email}>"
@@ -80,11 +95,13 @@ class Wallet(Base):
     __tablename__ = "wallet"
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    amount = Column(Integer, default=0, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True)
+    amount = Column(Numeric(10, 2), default=0.00, nullable=False)
     last_updated = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
+    user = relationship("User", back_populates="wallet")
 
+    
 class Balance(Base):
     __tablename__ = "balance"
 
@@ -205,26 +222,48 @@ class ActionCategory(enum.Enum):
 
 
 # -----------------------------
-# Actions sur le marché
+# Actions (packs)
 # -----------------------------
 class Action(Base):
     __tablename__ = "actions"
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(150), nullable=False)
-    category = Column(Enum(ActionCategory), nullable=False)
-    type = Column(Enum(ActionType), default=ActionType.individuelle)
+    category = Column(SqlEnum(ActionCategory), nullable=False)
+    type = Column(SqlEnum(ActionType), default=ActionType.individuelle)
     total_parts = Column(Integer, default=1)
     price_per_part = Column(Float, nullable=False)
-    status = Column(Enum(ActionStatus), default=ActionStatus.disponible)
+    value_bkc = Column(Float, nullable=True)
+    image_url = Column(String(255), nullable=True)
+    status = Column(SqlEnum(ActionStatus), default=ActionStatus.disponible)
+    icon = Column(String(255), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
+    user_packs = relationship("UserPack", back_populates="pack", cascade="all, delete-orphan")
+    daily_tasks = relationship("DailyTask", back_populates="pack", cascade="all, delete-orphan")
     buyers = relationship("UserAction", back_populates="action", cascade="all, delete-orphan")
 
 
-# -----------------------------
-# Parts achetées par les utilisateurs
-# -----------------------------
+class UserPack(Base):
+    __tablename__ = "user_packs"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    pack_id = Column(Integer, ForeignKey("actions.id"), nullable=False)
+    start_date = Column(DateTime, default=func.now())
+    last_claim_date = Column(DateTime, nullable=True)
+    daily_earnings = Column(Float, default=0)
+    is_unlocked = Column(Boolean, default=False)
+    total_earned = Column(Float, default=0)
+    current_day = Column(Date, default=func.current_date())
+    all_tasks_completed = Column(Boolean, default=False)
+    pack_status = Column(String(50), default="payé")  # ✅ à ajouter ici
+
+    user = relationship("User", back_populates="packs")
+    pack = relationship("Action", back_populates="user_packs")
+    tasks = relationship("UserDailyTask", back_populates="user_pack", cascade="all, delete-orphan")
+
+
 class UserAction(Base):
     __tablename__ = "user_actions"
 
@@ -237,3 +276,60 @@ class UserAction(Base):
 
     action = relationship("Action", back_populates="buyers")
     user = relationship("User", back_populates="user_actions")
+    
+
+class DailyTask(Base):
+    __tablename__ = "daily_tasks"
+
+    id = Column(Integer, primary_key=True)
+    pack_id = Column(Integer, ForeignKey("actions.id"), nullable=False)
+    platform = Column(String(50))
+    description = Column(String(255))
+    video_url = Column(String(255))
+    reward_share = Column(Float)
+
+    pack = relationship("Action", back_populates="daily_tasks")
+    user_tasks = relationship("UserDailyTask", back_populates="task", cascade="all, delete-orphan")
+
+
+class UserDailyTask(Base):
+    __tablename__ = "user_daily_tasks"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    task_id = Column(Integer, ForeignKey("daily_tasks.id"), nullable=False)
+    user_pack_id = Column(Integer, ForeignKey("user_packs.id"), nullable=True)
+    started_at = Column(DateTime, nullable=True)  # 🆕 ajouté
+    completed = Column(Boolean, default=False)
+    completed_at = Column(DateTime, nullable=True)
+
+    task = relationship("DailyTask", back_populates="user_tasks")
+    user_pack = relationship("UserPack", back_populates="tasks")
+
+
+# -----------------------------
+# Bonus
+# -----------------------------
+class BonusStatus(enum.Enum):
+    en_attente = "en_attente"
+    eligible = "eligible"
+    en_conversion = "en_conversion"
+    converti = "converti"
+    expire = "expire"
+
+
+class Bonus(Base):
+    __tablename__ = "bonus"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    total_points = Column(Integer, default=0, nullable=False)
+    points_restants = Column(Integer, default=0, nullable=False)
+    pourcentage_conversion = Column(Float, default=0.05, nullable=False)
+    valeur_equivalente = Column(Float, nullable=True)
+    status = Column(SqlEnum(BonusStatus), default=BonusStatus.en_attente, nullable=False)
+    raison = Column(String(100), default="bonus_inscription", nullable=False)
+    cree_le = Column(DateTime, server_default=func.now())
+    converti_le = Column(DateTime, nullable=True)
+
+    user = relationship("User", backref="bonus")

@@ -1,5 +1,8 @@
 # app/routers/auth.py
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request, Response, Cookie
+from fastapi import (
+    APIRouter, Depends, HTTPException, UploadFile, File, Form,
+    Request, Response, Cookie
+)
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -18,44 +21,31 @@ from app.utils.auth_utils import get_user_by_email
 from app.services.rewards import reward_referrer
 from app.dependencies.auth import get_current_user
 from app.utils.cookies import (
-    set_access_token_cookie,
-    set_refresh_token_cookie,
-    refresh_tokens,
-    clear_access_token_cookie,
+    set_access_token_cookie, set_refresh_token_cookie,
+    refresh_tokens, clear_access_token_cookie,
+)
+# Utilitaires avatar : centralise la sauvegarde et la conversion d'URL
+from app.services.avatar_update import (
+    generate_default_avatar, save_upload_file, make_public_url
 )
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
 ACCESS_TOKEN_EXPIRE_MINUTES = 15
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
 # ============================================================
 # ✅ Utils
 # ============================================================
 
-def ensure_static_uploads_dir() -> str:
-    base = os.path.join("static", "uploads")
-    os.makedirs(base, exist_ok=True)
-    return base
-
-def make_public_url(path: Optional[str]) -> Optional[str]:
-    """Transforme une URL relative (/static/uploads/...) en URL absolue (BACKEND_URL)."""
-    if not path:
-        return None
-    if path.startswith("http"):
-        return path
-    if path.startswith("/"):
-        return f"{BACKEND_URL}{path}"
-    return f"{BACKEND_URL}/{path}"
-
 def public_user_payload(user: User) -> dict:
+    """Construit la charge utile publique d’un utilisateur."""
     return {
         "id": user.id,
         "email": user.email,
         "username": user.username,
         "first_name": user.first_name,
         "last_name": user.last_name,
-        "avatar_url": make_public_url(user.avatar_url),
+        "avatar_url": make_public_url(user.avatar_url) if getattr(user, "avatar_url", None) else None,
         "is_verified": user.is_verified,
         "phone": getattr(user, "phone", None),
         "has_completed_welcome_tasks": user.has_completed_welcome_tasks,
@@ -67,7 +57,6 @@ def public_user_payload(user: User) -> dict:
 # ============================================================
 # 🔹 Register
 # ============================================================
-
 @router.post("/register", status_code=201)
 async def register_user(
     first_name: str = Form(...),
@@ -85,27 +74,14 @@ async def register_user(
     if password != confirm_password:
         raise HTTPException(status_code=400, detail="Les mots de passe ne correspondent pas.")
 
-    # Vérifier doublon email/username
+    # Vérification doublons
     dup_user = await db.execute(
         select(User).where((User.email == email) | (User.username == username))
     )
     if dup_user.scalars().first():
         raise HTTPException(status_code=409, detail="E-mail ou nom d'utilisateur déjà utilisé.")
 
-    # Upload avatar sécurisé
-    avatar_url = None
-    if avatar:
-        if avatar.content_type not in ["image/jpeg", "image/png"]:
-            raise HTTPException(status_code=400, detail="Format d'image non supporté")
-        uploads_dir = ensure_static_uploads_dir()
-        filename = f"{uuid4().hex}_{os.path.basename(avatar.filename)}"
-        path = os.path.join(uploads_dir, filename)
-        content = await avatar.read()
-        with open(path, "wb") as f:
-            f.write(content)
-        # ✅ Toujours sauver en relatif, mais stocker pour rendu public
-        avatar_url = f"/static/uploads/{filename}"
-
+    # Traitement date
     try:
         birth_date_obj = date.fromisoformat(birth_date)
     except ValueError:
@@ -114,11 +90,17 @@ async def register_user(
     hashed_pwd = pwd_context.hash(password)
     code = generate_code()
     now = datetime.utcnow()
-    code_expiration_minutes = 5
+    expiration = timedelta(minutes=5)
+    promo_code_clean = promo_code.upper() if promo_code else None
 
+    # --- Gestion de l'avatar
+    avatar_rel_path = None
+    if avatar:
+        avatar_rel_path = await save_upload_file(avatar)
+
+    # Crée ou met à jour PendingUser
     existing_pending = await db.execute(select(PendingUser).where(PendingUser.email == email))
     pending = existing_pending.scalars().first()
-    promo_code_clean = promo_code.upper() if promo_code else None
 
     if pending:
         pending.first_name = first_name
@@ -126,10 +108,11 @@ async def register_user(
         pending.birth_date = birth_date_obj
         pending.phone = phone
         pending.username = username
-        pending.avatar_url = avatar_url
+        if avatar_rel_path:
+            pending.avatar_url = avatar_rel_path
         pending.password_hash = hashed_pwd
         pending.verification_code = code
-        pending.code_expires_at = now + timedelta(minutes=code_expiration_minutes)
+        pending.code_expires_at = now + expiration
         pending.created_at = now
         pending.promo_code_used = promo_code_clean
     else:
@@ -140,10 +123,10 @@ async def register_user(
             phone=phone,
             email=email,
             username=username,
-            avatar_url=avatar_url,
+            avatar_url=avatar_rel_path,
             password_hash=hashed_pwd,
             verification_code=code,
-            code_expires_at=now + timedelta(minutes=code_expiration_minutes),
+            code_expires_at=now + expiration,
             is_verified=False,
             created_at=now,
             promo_code_used=promo_code_clean
@@ -158,7 +141,7 @@ async def register_user(
             "next": "verify_email",
             "email": email,
             "verification_code": code,
-            "expires_in": code_expiration_minutes * 60,
+            "expires_in": int(expiration.total_seconds()),
             "detail": "Code de vérification généré (affiché côté frontend)."
         },
         status_code=201
@@ -167,28 +150,13 @@ async def register_user(
 # ============================================================
 # 🔹 Verify Email
 # ============================================================
-
 @router.post("/verify-email")
 async def verify_email(
     data: VerificationSchema,
     db: AsyncSession = Depends(get_async_session)
 ):
-    # Vérification utilisateur déjà créé
-    existing_user = await get_user_by_email(db, data.email)
-    if existing_user:
-        access_token = create_access_token({"sub": existing_user.email})
-        refresh_token = create_refresh_token({"sub": existing_user.email})
-
-        response = JSONResponse(
-            {"status": "success", "user": public_user_payload(existing_user)}
-        )
-        set_access_token_cookie(response, access_token)
-        set_refresh_token_cookie(response, refresh_token)
-        return response
-
-    # Vérifier utilisateur en attente
-    result = await db.execute(select(PendingUser).where(PendingUser.email == data.email))
-    pending = result.scalars().first()
+    pending_result = await db.execute(select(PendingUser).where(PendingUser.email == data.email))
+    pending = pending_result.scalars().first()
     if not pending:
         raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
     if pending.verification_code != data.code:
@@ -196,8 +164,9 @@ async def verify_email(
     if datetime.utcnow() > pending.code_expires_at:
         raise HTTPException(status_code=400, detail="Code expiré")
 
-    # ✅ Reconstruit l’URL publique
-    avatar_final = make_public_url(pending.avatar_url)
+    # --- Avatar final
+    # Si PendingUser avait fourni un fichier -> convertit en URL publique
+    avatar_final = make_public_url(pending.avatar_url) if pending.avatar_url else None
 
     user = User(
         email=pending.email,
@@ -212,8 +181,75 @@ async def verify_email(
         has_completed_welcome_tasks=False
     )
     db.add(user)
+    await db.commit()
+    await db.refresh(user)
 
-    # Récompense si promo code utilisé
+    # Si pas d’avatar fourni, générer un avatar par défaut basé sur le User.id
+    if not pending.avatar_url:
+        avatar_final = await generate_default_avatar(user)
+        user.avatar_url = avatar_final
+        await db.commit()
+
+    # Gestion parrainage
+    if pending.promo_code_used:
+        try:
+            await reward_referrer(db, promo_code=pending.promo_code_used, new_user=user)
+        except Exception as e:
+            print(f"Erreur reward_referrer: {e}")
+        promo_q = select(PromoCode).where(PromoCode.code == pending.promo_code_used)
+        promo = (await db.execute(promo_q)).scalar_one_or_none()
+        if promo:
+            db.add(Friend(user_id=promo.user_id, friend_id=user.id, status="accepted"))
+
+    # Supprime PendingUser
+    await db.delete(pending)
+    await db.commit()
+
+    # Tokens et réponse
+    access_token = create_access_token({"sub": user.email})
+    refresh_token = create_refresh_token({"sub": user.email})
+    response = JSONResponse({"status": "success", "user": public_user_payload(user)})
+    set_access_token_cookie(response, access_token)
+    set_refresh_token_cookie(response, refresh_token)
+    return response
+
+    # Récupère pending user
+    result = await db.execute(select(PendingUser).where(PendingUser.email == data.email))
+    pending = result.scalars().first()
+    if not pending:
+        raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
+    if pending.verification_code != data.code:
+        raise HTTPException(status_code=400, detail="Code incorrect")
+    if datetime.utcnow() > pending.code_expires_at:
+        raise HTTPException(status_code=400, detail="Code expiré")
+
+    # Prépare avatar_final : convertit le chemin relatif stocké en URL publique
+    avatar_final = make_public_url(pending.avatar_url) if pending.avatar_url else None
+
+    # Crée l'utilisateur final en utilisant avatar_final (peut être None)
+    user = User(
+        email=pending.email,
+        first_name=pending.first_name,
+        last_name=pending.last_name,
+        birth_date=pending.birth_date,
+        phone=pending.phone,
+        username=pending.username,
+        avatar_url=avatar_final,
+        password_hash=pending.password_hash,
+        is_verified=True,
+        has_completed_welcome_tasks=False
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+
+    # Si aucun avatar fourni à l'inscription -> génère un avatar par défaut (ne remplace pas si déjà présent)
+    if not pending.avatar_url:
+        avatar_final = await generate_default_avatar(user)
+        user.avatar_url = avatar_final
+        await db.commit()
+
+    # Gestion du parrainage (si promo_code_used)
     if pending.promo_code_used:
         try:
             await reward_referrer(db, promo_code=pending.promo_code_used, new_user=user)
@@ -225,9 +261,11 @@ async def verify_email(
         if promo:
             db.add(Friend(user_id=promo.user_id, friend_id=user.id, status="accepted"))
 
+    # Supprime l'enregistrement pending
     await db.delete(pending)
     await db.commit()
 
+    # Génération tokens et réponse
     access_token = create_access_token({"sub": user.email})
     refresh_token = create_refresh_token({"sub": user.email})
 

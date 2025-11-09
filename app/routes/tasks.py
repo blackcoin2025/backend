@@ -11,7 +11,7 @@ from app.models import Task, UserTask, User
 from app.schemas import TaskSchema
 from app.dependencies.auth import get_current_user
 from app.services.balance_service import credit_balance
-from app.services.wallet_service import add_wallet_points
+from app.services.bonus_service import add_bonus_points # ✅ remplace add_wallet_points
 
 router = APIRouter(
     tags=["Tasks"]  # ✅ aucun prefix ici
@@ -120,11 +120,11 @@ async def validate_task(
     # Répartition des points
     total_points = task.reward_points
     balance_points = int(total_points * 0.8)
-    wallet_points = total_points - balance_points
+    bonus_points = total_points - balance_points  # ✅ au lieu de wallet_points
 
     try:
         await credit_balance(db, current_user.id, balance_points)
-        await add_wallet_points(current_user, wallet_points, db)
+        await add_bonus_points(current_user, bonus_points, db)  # ✅ remplacé ici
     except Exception as e:
         await db.rollback()
         raise HTTPException(
@@ -140,7 +140,7 @@ async def validate_task(
         "task_id": task_id,
         "reward": {
             "balance": balance_points,
-            "wallet": wallet_points,
+            "bonus": bonus_points,  # ✅ renommé
             "total": total_points
         }
     }

@@ -1,7 +1,7 @@
 # app/services/rewards.py
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from app.models import User, PromoCode, Wallet, Balance, Friend
+from app.models import User, PromoCode, Wallet, Balance, Friend, Bonus
 
 
 async def reward_referrer(db: AsyncSession, promo_code: str, new_user: User):
@@ -24,11 +24,14 @@ async def reward_referrer(db: AsyncSession, promo_code: str, new_user: User):
     if not referrer:
         return False
 
-    # 3. Créditer les points (Wallet et Balance)
-    wallet_q = select(Wallet).where(Wallet.user_id == referrer.id)
-    wallet = (await db.execute(wallet_q)).scalars().first()
-    if wallet:
-        wallet.amount += 200
+        # 3. Créditer 0.25 point dans la table Bonus
+    new_bonus = Bonus(
+        user_id=referrer.id,
+        amount=0.25,
+        description=f"Bonus de parrainage reçu grâce à {new_user.username}"
+    )
+    db.add(new_bonus)
+
 
     balance_q = select(Balance).where(Balance.user_id == referrer.id)
     balance = (await db.execute(balance_q)).scalars().first()
@@ -71,11 +74,13 @@ async def reward_referrer(db: AsyncSession, promo_code: str, new_user: User):
     if not referrer:
         return False
 
-    # 3. Créditer les points (Wallet et Balance)
-    wallet_q = select(Wallet).where(Wallet.user_id == referrer.id)
-    wallet = (await db.execute(wallet_q)).scalars().first()
-    if wallet:
-        wallet.amount += 200
+        # 3. Créditer 0.25 point dans la table Bonus
+    new_bonus = Bonus(
+        user_id=referrer.id,
+        amount=0.25,
+        description=f"Bonus de parrainage reçu grâce à {new_user.username}"
+    )
+    db.add(new_bonus)
 
     balance_q = select(Balance).where(Balance.user_id == referrer.id)
     balance = (await db.execute(balance_q)).scalars().first()

@@ -4,16 +4,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from app.database import get_async_session
 from app.models import User
-from app.services.wallet_service import add_wallet_points
+from app.services.bonus_service import add_bonus_points  # ✅ déplacé ici
 from app.services.balance_service import credit_balance, get_user_balance
 from app.routers.auth import get_current_user
 import logging
 
-router = APIRouter(
-    prefix="/welcome",
-    tags=["Welcome"]
-)
-
+router = APIRouter(prefix="/welcome", tags=["Welcome"])
 logger = logging.getLogger(__name__)
 
 
@@ -21,7 +17,7 @@ logger = logging.getLogger(__name__)
 # ✅ Schéma de validation
 # ===============================
 class CompleteTasksRequest(BaseModel):
-    total_points: int  # juste pour validation du payload côté client
+    total_points: int
 
 
 # ===============================
@@ -41,10 +37,9 @@ async def complete_welcome_tasks(
 ):
     """
     Marque les tâches de bienvenue comme complétées et crédite les points :
-    - 2000 → wallet
-    - 3000 → balance
+    - 50 → bonus (stocké pour conversion future)
+    - 4950 → balance (wallet)
     """
-
     try:
         # 🔒 Vérification : déjà complété ?
         if current_user.has_completed_welcome_tasks:
@@ -67,10 +62,10 @@ async def complete_welcome_tasks(
                 }
             }
 
-        # ✅ Créditer et marquer comme complété
+        # ✅ Créditer le bonus et la balance
         current_user.has_completed_welcome_tasks = True
-        await add_wallet_points(user=current_user, amount=2000, db=db)
-        await credit_balance(db, current_user.id, points=3000)
+        await add_bonus_points(db=db, user_id=current_user.id, amount=50)  # bonus stocké
+        await credit_balance(db, current_user.id, points=4950)
 
         await db.commit()
         await db.refresh(current_user)
@@ -91,10 +86,7 @@ async def complete_welcome_tasks(
                 "wallet_address": getattr(current_user, "wallet_address", None),
                 "is_verified": current_user.is_verified,
             },
-            "points_added": {
-                "wallet": 2000,
-                "balance": 3000
-            }
+            "points_added": {"bonus": 50, "balance": 4950}
         }
 
     except Exception as e:
