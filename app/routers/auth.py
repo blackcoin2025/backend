@@ -45,7 +45,7 @@ def public_user_payload(user: User) -> dict:
         "username": user.username,
         "first_name": user.first_name,
         "last_name": user.last_name,
-        "avatar_url": make_public_url(user.avatar_url) if getattr(user, "avatar_url", None) else None,
+        #"avatar_url": make_public_url(user.avatar_url) if getattr(user, "avatar_url", None) else None,
         "is_verified": user.is_verified,
         "phone": getattr(user, "phone", None),
         "has_completed_welcome_tasks": user.has_completed_welcome_tasks,

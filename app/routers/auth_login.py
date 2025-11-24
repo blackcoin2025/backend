@@ -84,7 +84,7 @@ async def login_user(
         "email": user.email,
         "username": user.username,
         "phone": user.phone,
-        "avatar_url": user.avatar_url,
+        #"avatar_url": user.avatar_url,
         "is_verified": bool(user.is_verified),
         "has_completed_welcome_tasks": bool(user.has_completed_welcome_tasks),
     }

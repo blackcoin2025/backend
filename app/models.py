@@ -323,8 +323,8 @@ class Bonus(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    total_points = Column(Integer, default=0, nullable=False)
-    points_restants = Column(Integer, default=0, nullable=False)
+    total_points = Column(Float, default=0.0, nullable=False)
+    points_restants = Column(Float, default=0.0, nullable=False)
     pourcentage_conversion = Column(Float, default=0.05, nullable=False)
     valeur_equivalente = Column(Float, nullable=True)
     status = Column(SqlEnum(BonusStatus), default=BonusStatus.en_attente, nullable=False)
