@@ -4,6 +4,7 @@ from typing import Optional, List
 from pydantic import BaseModel, Field
 from typing import Optional, List, Literal
 from datetime import datetime
+from pydantic import computed_field
 from typing import List
 from enum import Enum
 
@@ -193,16 +194,23 @@ class ActionBase(BaseModel):
     category: ActionCategoryEnum
     type: ActionTypeEnum = ActionTypeEnum.individuelle
     total_parts: int = 1
-    price_per_part: float
+
+    price_usdt: float                 # ✅ NOUVEAU prix réel
+    price_per_part: float             # ✅ reste pour calcul BKC
+
     value_bkc: Optional[float] = None
     image_url: Optional[str] = None
-    icon: Optional[str] = None
 
 
 class ActionSchema(ActionBase):
     id: int
     status: ActionStatusEnum = ActionStatusEnum.disponible
     created_at: datetime
+
+    @computed_field
+    @property
+    def estimated_daily_bkc(self) -> float:
+        return round(self.price_per_part * 0.012, 5)
 
     model_config = {"from_attributes": True}
 

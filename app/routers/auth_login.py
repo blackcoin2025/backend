@@ -66,6 +66,7 @@ async def login_user(
         )
 
     # ── 3) Vérification du mot de passe
+    print("password bytes =", len(password.encode("utf-8")))
     if not pwd_context.verify(password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

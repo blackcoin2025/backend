@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import AsyncSessionLocal
 from app.models import Action, ActionCategory, DailyTask
 
+BKC_TO_USDT = 2  # 1 BKC = 2 USDT
+
 PACKS = [
     {"name": "Pack Découverte", "price": 4.44, "gain_percent": 1.2, "image": "/images/packs/pack1.png"},
     {"name": "Pack Croissance", "price": 8.88, "gain_percent": 1.2, "image": "/images/packs/pack2.png"},
@@ -32,23 +34,29 @@ async def seed_packs():
     async with AsyncSessionLocal() as session:
         try:
             for p in PACKS:
-                q = await session.execute(select(Action).where(Action.name == p["name"]))
+                q = await session.execute(
+                    select(Action).where(Action.name == p["name"])
+                )
                 existing = q.scalars().first()
                 if existing:
                     print(f"⚠️  '{p['name']}' existe déjà — on passe.")
                     continue
 
+                price_bkc = p["price"]
+                price_usdt = round(price_bkc * BKC_TO_USDT, 6)
+
                 pack = Action(
                     name=p["name"],
                     category=ActionCategory.finance,
-                    price_per_part=p["price"],
-                    value_bkc=p["price"],
+                    price_per_part=price_bkc,   # BKC (référence interne)
+                    price_usdt=price_usdt,     # USDT (paiement réel)
+                    value_bkc=price_bkc,
                     image_url=p["image"],
                 )
-                session.add(pack)
-                await session.flush()  # flush pour récupérer l'id du pack
 
-                # Ajouter toutes les tâches en mémoire avant le commit
+                session.add(pack)
+                await session.flush()
+
                 tasks = [
                     DailyTask(
                         pack_id=pack.id,
@@ -59,9 +67,10 @@ async def seed_packs():
                     )
                     for t in TASK_LINKS
                 ]
+
                 session.add_all(tasks)
 
-            await session.commit()  # commit unique pour tous les packs et toutes les tâches
+            await session.commit()
             print("✅ Tous les packs et tâches ont été insérés avec succès.")
 
         except Exception as e:

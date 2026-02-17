@@ -15,6 +15,7 @@ from sqlalchemy.types import Enum as SqlEnum  # 👈 pour les enums SQLAlchemy
 from app.database import Base
 from datetime import datetime
 import enum  # 👈 garde pour tes enums Python
+from decimal import Decimal
 
 # -----------------------------
 # Utilisateurs en attente
@@ -236,7 +237,7 @@ class Action(Base):
     value_bkc = Column(Float, nullable=True)
     image_url = Column(String(255), nullable=True)
     status = Column(SqlEnum(ActionStatus), default=ActionStatus.disponible)
-    icon = Column(String(255), nullable=True)
+    price_usdt = Column(Float, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 
     user_packs = relationship("UserPack", back_populates="pack", cascade="all, delete-orphan")
@@ -323,13 +324,29 @@ class Bonus(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    total_points = Column(Float, default=0.0, nullable=False)
-    points_restants = Column(Float, default=0.0, nullable=False)
-    pourcentage_conversion = Column(Float, default=0.05, nullable=False)
-    valeur_equivalente = Column(Float, nullable=True)
+
+    total_points = Column(Numeric(18, 6), default=Decimal("0"), nullable=False)
+    points_restants = Column(Numeric(18, 6), default=Decimal("0"), nullable=False)
+    pourcentage_conversion = Column(Numeric(10, 6), default=Decimal("0.05"), nullable=False)
+    valeur_equivalente = Column(Numeric(18, 6), nullable=True)
+
     status = Column(SqlEnum(BonusStatus), default=BonusStatus.en_attente, nullable=False)
     raison = Column(String(100), default="bonus_inscription", nullable=False)
+
     cree_le = Column(DateTime, server_default=func.now())
     converti_le = Column(DateTime, nullable=True)
+    last_claim_at = Column(DateTime, nullable=True)
 
     user = relationship("User", backref="bonus")
+
+
+class RealCash(Base):
+    __tablename__ = "real_cash"  # nom différent pour éviter conflit
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True)
+    cash_balance = Column(Numeric(12,2), default=0.00, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    user = relationship("User", backref="real_cash")

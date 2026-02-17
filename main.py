@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from app.database import engine, Base, AsyncSessionLocal
 from app.services.addtasks import add_sample_tasks
 from app.tasks.reset_daily_tasks import start_daily_reset_task  # ✅ seul import correct
+from app.routes import cashmoney  # ✅ ajouter ceci avec les autres imports
 
 from app.routes import (
     welcome, wallet, balance, user_profile,
@@ -74,6 +75,7 @@ app.include_router(luckygame.router)
 app.include_router(cookies.router)
 app.include_router(tradegame.router)
 app.include_router(bonus.router)
+app.include_router(cashmoney.router)
 app.include_router(mining.router, prefix="/mining", tags=["Mining"])
 app.include_router(minhistory.router, prefix="/minhistory", tags=["Historique Mining"])
 app.include_router(tasks.router, prefix="/tasks", tags=["Tâches"])

@@ -8,7 +8,7 @@ from app.database import get_async_session
 from app.models import Action, UserPack, User, DailyTask, UserDailyTask
 from app.schemas import ActionBase, ActionSchema, UserPackSchema
 from app.dependencies.auth import get_current_user
-from app.services.wallet_service import debit_wallet
+from app.services.cash_service import debit_real_cash
 from app.services.pack_service import start_pack, claim_pack_reward
 
 router = APIRouter(prefix="/actions", tags=["Actions"])
@@ -79,7 +79,7 @@ async def buy_pack(
         raise HTTPException(status_code=400, detail="Ce pack a déjà été acheté")
 
     try:
-        await debit_wallet(current_user, pack.price_per_part, db)
+        await debit_real_cash(current_user, pack.price_usdt, db)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -295,19 +295,32 @@ async def complete_task(
 async def claim_reward(
     user_pack_id: int,
     db: AsyncSession = Depends(get_async_session),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
+    """
+    Permet à l'utilisateur de réclamer les gains d'un pack
+    après avoir complété toutes les tâches et respecté le délai.
+    """
+
     try:
-        result = await claim_pack_reward(current_user.id, user_pack_id, db)
+        result = await claim_pack_reward(
+            user_id=current_user.id,
+            user_pack_id=user_pack_id,
+            db=db,
+        )
+
         return {
             "status": "success",
-            "message": result.get("message", "Réclamation effectuée ✅"),
-            "claimed_amount": result.get("claimed_amount", 0),
-            "wallet_balance": result.get("wallet_balance", 0),
-            "next_claim_available": result.get("next_claim_available"),
+            **result,  # 🔥 on retourne directement ce que renvoie le service
             "timestamp": datetime.utcnow().isoformat(),
         }
-    except HTTPException as e:
-        raise e
+
+    except HTTPException:
+        # On laisse FastAPI gérer les erreurs métier propres
+        raise
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erreur pendant la réclamation : {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Erreur interne pendant la réclamation.",
+        )

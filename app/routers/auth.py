@@ -12,7 +12,7 @@ from uuid import uuid4
 import os
 from typing import Optional
 
-from app.models import PendingUser, User, PromoCode, Friend
+from app.models import PendingUser, User, PromoCode, Friend, RealCash, Wallet
 from app.database import get_async_session
 from app.services.VerifyEmail import generate_code, pwd_context
 from app.schemas import VerificationSchema
@@ -155,78 +155,25 @@ async def verify_email(
     data: VerificationSchema,
     db: AsyncSession = Depends(get_async_session)
 ):
-    pending_result = await db.execute(select(PendingUser).where(PendingUser.email == data.email))
-    pending = pending_result.scalars().first()
-    if not pending:
-        raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
-    if pending.verification_code != data.code:
-        raise HTTPException(status_code=400, detail="Code incorrect")
-    if datetime.utcnow() > pending.code_expires_at:
-        raise HTTPException(status_code=400, detail="Code expiré")
-
-    # --- Avatar final
-    # Si PendingUser avait fourni un fichier -> convertit en URL publique
-    avatar_final = make_public_url(pending.avatar_url) if pending.avatar_url else None
-
-    user = User(
-        email=pending.email,
-        first_name=pending.first_name,
-        last_name=pending.last_name,
-        birth_date=pending.birth_date,
-        phone=pending.phone,
-        username=pending.username,
-        avatar_url=avatar_final,
-        password_hash=pending.password_hash,
-        is_verified=True,
-        has_completed_welcome_tasks=False
+    # 🔎 récupérer pending user
+    result = await db.execute(
+        select(PendingUser).where(PendingUser.email == data.email)
     )
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-
-    # Si pas d’avatar fourni, générer un avatar par défaut basé sur le User.id
-    if not pending.avatar_url:
-        avatar_final = await generate_default_avatar(user)
-        user.avatar_url = avatar_final
-        await db.commit()
-
-    # Gestion parrainage
-    if pending.promo_code_used:
-        try:
-            await reward_referrer(db, promo_code=pending.promo_code_used, new_user=user)
-        except Exception as e:
-            print(f"Erreur reward_referrer: {e}")
-        promo_q = select(PromoCode).where(PromoCode.code == pending.promo_code_used)
-        promo = (await db.execute(promo_q)).scalar_one_or_none()
-        if promo:
-            db.add(Friend(user_id=promo.user_id, friend_id=user.id, status="accepted"))
-
-    # Supprime PendingUser
-    await db.delete(pending)
-    await db.commit()
-
-    # Tokens et réponse
-    access_token = create_access_token({"sub": user.email})
-    refresh_token = create_refresh_token({"sub": user.email})
-    response = JSONResponse({"status": "success", "user": public_user_payload(user)})
-    set_access_token_cookie(response, access_token)
-    set_refresh_token_cookie(response, refresh_token)
-    return response
-
-    # Récupère pending user
-    result = await db.execute(select(PendingUser).where(PendingUser.email == data.email))
     pending = result.scalars().first()
+
     if not pending:
         raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
+
     if pending.verification_code != data.code:
         raise HTTPException(status_code=400, detail="Code incorrect")
+
     if datetime.utcnow() > pending.code_expires_at:
         raise HTTPException(status_code=400, detail="Code expiré")
 
-    # Prépare avatar_final : convertit le chemin relatif stocké en URL publique
+    # 🖼 avatar public si fourni
     avatar_final = make_public_url(pending.avatar_url) if pending.avatar_url else None
 
-    # Crée l'utilisateur final en utilisant avatar_final (peut être None)
+    # 👤 création user final
     user = User(
         email=pending.email,
         first_name=pending.first_name,
@@ -239,39 +186,72 @@ async def verify_email(
         is_verified=True,
         has_completed_welcome_tasks=False
     )
+
     db.add(user)
     await db.commit()
     await db.refresh(user)
 
-    # Si aucun avatar fourni à l'inscription -> génère un avatar par défaut (ne remplace pas si déjà présent)
-    if not pending.avatar_url:
+    # 🧠 avatar par défaut si absent
+    if not avatar_final:
         avatar_final = await generate_default_avatar(user)
         user.avatar_url = avatar_final
         await db.commit()
 
-    # Gestion du parrainage (si promo_code_used)
+    # 💰 création automatique des soldes (IMPORTANT — cohérence données)
+    wallet = Wallet(
+        user_id=user.id,
+        amount=0
+    )
+
+    real_cash = RealCash(
+        user_id=user.id,
+        cash_balance=0
+    )
+
+    db.add(wallet)
+    db.add(real_cash)
+    await db.commit()
+
+    # 🎁 parrainage
     if pending.promo_code_used:
         try:
-            await reward_referrer(db, promo_code=pending.promo_code_used, new_user=user)
+            await reward_referrer(
+                db,
+                promo_code=pending.promo_code_used,
+                new_user=user
+            )
         except Exception as e:
-            print(f"Erreur reward_referrer: {e}")
+            print(f"reward_referrer erreur: {e}")
 
-        promo_q = select(PromoCode).where(PromoCode.code == pending.promo_code_used)
+        promo_q = select(PromoCode).where(
+            PromoCode.code == pending.promo_code_used
+        )
         promo = (await db.execute(promo_q)).scalar_one_or_none()
-        if promo:
-            db.add(Friend(user_id=promo.user_id, friend_id=user.id, status="accepted"))
 
-    # Supprime l'enregistrement pending
+        if promo:
+            db.add(Friend(
+                user_id=promo.user_id,
+                friend_id=user.id,
+                status="accepted"
+            ))
+            await db.commit()
+
+    # 🧹 supprimer pending
     await db.delete(pending)
     await db.commit()
 
-    # Génération tokens et réponse
+    # 🔐 tokens
     access_token = create_access_token({"sub": user.email})
     refresh_token = create_refresh_token({"sub": user.email})
 
-    response = JSONResponse({"status": "success", "user": public_user_payload(user)})
+    response = JSONResponse({
+        "status": "success",
+        "user": public_user_payload(user)
+    })
+
     set_access_token_cookie(response, access_token)
     set_refresh_token_cookie(response, refresh_token)
+
     return response
 
 # ============================================================

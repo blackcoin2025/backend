@@ -1,70 +1,93 @@
 # app/services/wallet_service.py
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from app.models import Wallet
+
 from decimal import Decimal
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.models import Wallet
 
 
-# -----------------------------
-# 💰 Wallet (argent réel)
-# -----------------------------
-
-async def credit_wallet(user, amount: float, db: AsyncSession):
+# -----------------------------------------------------------------
+# 💰 Créditer le wallet (SANS COMMIT)
+# -----------------------------------------------------------------
+async def credit_wallet(user, amount: float, db: AsyncSession) -> Wallet:
     """
-    Créditer le wallet de l'utilisateur avec un montant positif.
-    Crée un wallet si l'utilisateur n'en a pas encore.
+    Créditer le wallet d'un utilisateur.
+    ⚠️ Ne commit PAS. Doit être appelé dans une transaction.
     """
+
     if amount is None or amount <= 0:
         raise ValueError("Le montant à créditer doit être supérieur à zéro.")
 
-    result = await db.execute(select(Wallet).where(Wallet.user_id == user.id))
+    amount_decimal = Decimal(str(amount))
+
+    result = await db.execute(
+        select(Wallet).where(Wallet.user_id == user.id)
+    )
     wallet = result.scalars().first()
 
     if wallet:
-        wallet.amount += Decimal(str(amount))
+        wallet.amount = (wallet.amount or Decimal("0")) + amount_decimal
     else:
-        wallet = Wallet(user_id=user.id, amount=amount)
+        wallet = Wallet(
+            user_id=user.id,
+            amount=amount_decimal
+        )
         db.add(wallet)
 
-    await db.commit()
-    await db.refresh(wallet)
     return wallet
 
 
-async def debit_wallet(user, amount: float, db: AsyncSession):
+# -----------------------------------------------------------------
+# 💳 Débiter le wallet (SANS COMMIT)
+# -----------------------------------------------------------------
+async def debit_wallet(user, amount: float, db: AsyncSession) -> Wallet:
     """
-    Débiter le wallet de l'utilisateur.
-    Empêche le solde négatif et renvoie une erreur claire si fonds insuffisants.
+    Débiter le wallet d'un utilisateur.
+    Empêche le solde négatif.
+    ⚠️ Ne commit PAS.
     """
+
     if amount is None or amount <= 0:
         raise ValueError("Le montant à débiter doit être supérieur à zéro.")
 
-    result = await db.execute(select(Wallet).where(Wallet.user_id == user.id))
+    amount_decimal = Decimal(str(amount))
+
+    result = await db.execute(
+        select(Wallet).where(Wallet.user_id == user.id)
+    )
     wallet = result.scalars().first()
 
     if not wallet:
-        raise ValueError("Aucun wallet trouvé pour cet utilisateur. Veuillez d'abord créditer le compte.")
+        raise ValueError("Aucun wallet trouvé pour cet utilisateur.")
 
-    if wallet.amount <= 0:
-        raise ValueError("Le solde de votre compte est vide. Veuillez recharger avant d'effectuer cette opération.")
+    current_balance = wallet.amount or Decimal("0")
 
-    if wallet.amount < amount:
+    if current_balance <= 0:
+        raise ValueError("Solde vide.")
+
+    if current_balance < amount_decimal:
         raise ValueError(
-            f"Solde insuffisant : votre solde est de {wallet.amount:.2f} $BKC, "
-            f"mais l'opération nécessite {amount:.2f} $BKC."
+            f"Solde insuffisant : {current_balance:.2f} BKC disponible, "
+            f"{amount_decimal:.2f} BKC requis."
         )
 
-    wallet.amount -= Decimal(str(amount))
-    await db.commit()
-    await db.refresh(wallet)
+    wallet.amount = current_balance - amount_decimal
+
     return wallet
 
 
-async def get_wallet_balance(user, db: AsyncSession):
+# -----------------------------------------------------------------
+# 🔎 Récupérer le solde
+# -----------------------------------------------------------------
+async def get_wallet_balance(user, db: AsyncSession) -> Decimal:
     """
-    Récupère le solde actuel du wallet de l'utilisateur.
-    Retourne 0 si aucun wallet n'existe encore.
+    Retourne le solde du wallet.
+    Ne crée pas de wallet automatiquement.
     """
-    result = await db.execute(select(Wallet).where(Wallet.user_id == user.id))
+
+    result = await db.execute(
+        select(Wallet).where(Wallet.user_id == user.id)
+    )
     wallet = result.scalars().first()
-    return wallet.amount if wallet else 0.0
+
+    return wallet.amount if wallet else Decimal("0")

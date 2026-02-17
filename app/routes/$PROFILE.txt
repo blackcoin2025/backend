@@ -1,0 +1,4 @@
+function backend {
+    cd "C:\Users\EXCELLENCE GSM\blackcoin app\blackcoin-backend"
+    .\.venv\Scripts\Activate
+}
