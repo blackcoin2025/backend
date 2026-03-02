@@ -155,92 +155,68 @@ async def verify_email(
     data: VerificationSchema,
     db: AsyncSession = Depends(get_async_session)
 ):
-    # 🔎 récupérer pending user
-    result = await db.execute(
-        select(PendingUser).where(PendingUser.email == data.email)
-    )
-    pending = result.scalars().first()
+    async with db.begin():
 
-    if not pending:
-        raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
+        # 🔎 récupérer pending user
+        result = await db.execute(
+            select(PendingUser).where(PendingUser.email == data.email)
+        )
+        pending = result.scalars().first()
 
-    if pending.verification_code != data.code:
-        raise HTTPException(status_code=400, detail="Code incorrect")
+        if not pending:
+            raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
 
-    if datetime.utcnow() > pending.code_expires_at:
-        raise HTTPException(status_code=400, detail="Code expiré")
+        if pending.verification_code != data.code:
+            raise HTTPException(status_code=400, detail="Code incorrect")
 
-    # 🖼 avatar public si fourni
-    avatar_final = make_public_url(pending.avatar_url) if pending.avatar_url else None
+        if datetime.utcnow() > pending.code_expires_at:
+            raise HTTPException(status_code=400, detail="Code expiré")
 
-    # 👤 création user final
-    user = User(
-        email=pending.email,
-        first_name=pending.first_name,
-        last_name=pending.last_name,
-        birth_date=pending.birth_date,
-        phone=pending.phone,
-        username=pending.username,
-        avatar_url=avatar_final,
-        password_hash=pending.password_hash,
-        is_verified=True,
-        has_completed_welcome_tasks=False
-    )
+        avatar_final = (
+            make_public_url(pending.avatar_url)
+            if pending.avatar_url
+            else None
+        )
 
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
+        # 👤 création user
+        user = User(
+            email=pending.email,
+            first_name=pending.first_name,
+            last_name=pending.last_name,
+            birth_date=pending.birth_date,
+            phone=pending.phone,
+            username=pending.username,
+            avatar_url=avatar_final,
+            password_hash=pending.password_hash,
+            is_verified=True,
+            has_completed_welcome_tasks=False
+        )
 
-    # 🧠 avatar par défaut si absent
-    if not avatar_final:
-        avatar_final = await generate_default_avatar(user)
-        user.avatar_url = avatar_final
-        await db.commit()
+        db.add(user)
+        await db.flush()  # obtenir user.id
 
-    # 💰 création automatique des soldes (IMPORTANT — cohérence données)
-    wallet = Wallet(
-        user_id=user.id,
-        amount=0
-    )
+        # 🧠 avatar par défaut
+        if not avatar_final:
+            avatar_final = await generate_default_avatar(user)
+            user.avatar_url = avatar_final
 
-    real_cash = RealCash(
-        user_id=user.id,
-        cash_balance=0
-    )
+        # 💰 soldes initiaux
+        wallet = Wallet(user_id=user.id, amount=0)
+        real_cash = RealCash(user_id=user.id, cash_balance=0)
+        db.add_all([wallet, real_cash])
 
-    db.add(wallet)
-    db.add(real_cash)
-    await db.commit()
-
-    # 🎁 parrainage
-    if pending.promo_code_used:
-        try:
+        # 🎁 parrainage (PAS de création Friend ici)
+        if pending.promo_code_used:
             await reward_referrer(
-                db,
+                db=db,
                 promo_code=pending.promo_code_used,
                 new_user=user
             )
-        except Exception as e:
-            print(f"reward_referrer erreur: {e}")
 
-        promo_q = select(PromoCode).where(
-            PromoCode.code == pending.promo_code_used
-        )
-        promo = (await db.execute(promo_q)).scalar_one_or_none()
+        # 🧹 supprimer pending
+        await db.delete(pending)
 
-        if promo:
-            db.add(Friend(
-                user_id=promo.user_id,
-                friend_id=user.id,
-                status="accepted"
-            ))
-            await db.commit()
-
-    # 🧹 supprimer pending
-    await db.delete(pending)
-    await db.commit()
-
-    # 🔐 tokens
+    # 🔐 génération tokens (hors transaction)
     access_token = create_access_token({"sub": user.email})
     refresh_token = create_refresh_token({"sub": user.email})
 

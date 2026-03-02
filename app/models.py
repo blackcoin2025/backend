@@ -2,19 +2,20 @@ from sqlalchemy import (
     Column,
     String,
     Integer,
+    BigInteger,   # ✅ AJOUT OBLIGATOIRE
     Date,
     Boolean,
     DateTime,
     ForeignKey,
     Float,
-    Numeric,  # ✅ ajouté ici
+    Numeric,
 )
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
-from sqlalchemy.types import Enum as SqlEnum  # 👈 pour les enums SQLAlchemy
+from sqlalchemy.types import Enum as SqlEnum
 from app.database import Base
 from datetime import datetime
-import enum  # 👈 garde pour tes enums Python
+import enum
 from decimal import Decimal
 
 # -----------------------------
@@ -90,27 +91,76 @@ class PromoCode(Base):
 
 
 # -----------------------------
-# Données complémentaires
+# 💰 Wallet utilisateur
 # -----------------------------
 class Wallet(Base):
     __tablename__ = "wallet"
 
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True)
-    amount = Column(Numeric(10, 2), default=0.00, nullable=False)
-    last_updated = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    id = Column(Integer, primary_key=True, index=True)
 
-    user = relationship("User", back_populates="wallet")
+    # Un seul wallet par utilisateur
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
 
-    
+    # Montant exact (jamais float)
+    amount = Column(
+        Numeric(10, 2, asdecimal=True),
+        nullable=False,
+        default=Decimal("0.00"),
+        server_default="0.00",
+    )
+
+    # Timestamp automatique
+    last_updated = Column(
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    # Relation ORM
+    user = relationship(
+        "User",
+        back_populates="wallet",
+        uselist=False,
+    )
+
+    # -----------------------------
+    # Helpers métier
+    # -----------------------------
+    def get_balance(self) -> Decimal:
+        """Retourne toujours un Decimal valide."""
+        return self.amount or Decimal("0.00")
+
+    def __repr__(self) -> str:
+        return f"<Wallet user_id={self.user_id} balance={self.amount}>"
+
+
 class Balance(Base):
     __tablename__ = "balance"
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    points = Column(Integer, default=0, nullable=False)
-    last_updated = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True
+    )
+    points = Column(
+        BigInteger,
+        default=0,
+        nullable=False
+    )
+    last_updated = Column(
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now()
+    )
 
 class Friend(Base):
     __tablename__ = "friends"
