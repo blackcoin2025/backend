@@ -9,6 +9,7 @@ from datetime import datetime
 from app.database import get_async_session
 from app.models import Task, UserTask, User
 from app.schemas import TaskSchema
+from decimal import Decimal
 from app.dependencies.auth import get_current_user
 from app.services.balance_service import credit_balance
 from app.services.bonus_service import add_bonus_points # ✅ remplace add_wallet_points
@@ -119,12 +120,16 @@ async def validate_task(
 
     # Répartition des points
     total_points = task.reward_points
-    balance_points = int(total_points * 0.8)
-    bonus_points = total_points - balance_points  # ✅ au lieu de wallet_points
+    total_points = Decimal(task.reward_points)
+
+    BONUS_FIXED = Decimal("0.05")
+
+    bonus_points = BONUS_FIXED if total_points >= BONUS_FIXED else total_points
+    balance_points = total_points - bonus_points
 
     try:
         await credit_balance(db, current_user.id, balance_points)
-        await add_bonus_points(current_user, bonus_points, db)  # ✅ remplacé ici
+        await add_bonus_points(db, current_user.id, bonus_points)  # ✅ remplacé ici
     except Exception as e:
         await db.rollback()
         raise HTTPException(

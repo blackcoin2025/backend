@@ -17,7 +17,7 @@ from app.tasks.reset_daily_tasks import start_daily_reset_task  # ✅ seul impor
 from app.routes import cashmoney  # ✅ ajouter ceci avec les autres imports
 
 from app.routes import (
-    welcome, wallet, balance, user_profile,
+    welcome, wallet, balance, user_profile, eligibility,
     mining, minhistory, tasks, tradegame, bonus, actions
 )
 from app.routers import auth, auth_login, friends, luckygame
@@ -80,6 +80,7 @@ app.include_router(mining.router, prefix="/mining", tags=["Mining"])
 app.include_router(minhistory.router, prefix="/minhistory", tags=["Historique Mining"])
 app.include_router(tasks.router, prefix="/tasks", tags=["Tâches"])
 app.include_router(actions.router)
+app.include_router(eligibility.router)  # ✅ airdrop check
 
 # -----------------------
 # Fichiers statiques
