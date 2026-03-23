@@ -1,6 +1,6 @@
 # app/routes/eligibility.py
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, distinct
 from datetime import datetime
@@ -12,8 +12,9 @@ from app.models import (
     UserPack,
     UserTask,
     Balance,
+    UserMiningStats,  # ✅ AJOUT
 )
-from app.dependencies.auth import get_current_user  # JWT obligatoire
+from app.dependencies.auth import get_current_user
 
 router = APIRouter(prefix="/eligibility", tags=["Airdrop"])
 
@@ -23,7 +24,6 @@ async def check_eligibility(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-
     user_id = current_user.id
 
     # =========================
@@ -45,12 +45,12 @@ async def check_eligibility(
     # =========================
     has_pack = (
         await db.execute(
-            select(UserPack).where(
+            select(UserPack.id).where(
                 UserPack.user_id == user_id,
                 UserPack.pack_status == "payé",
             )
         )
-    ).scalars().first() is not None
+    ).first() is not None
 
     # =========================
     # 3️⃣ 50 TASKS DISTINCT
@@ -66,7 +66,7 @@ async def check_eligibility(
     ).scalar() or 0
 
     # =========================
-    # 4️⃣ 50.000.000 POINTS
+    # 4️⃣ POINTS
     # =========================
     balance = (
         await db.execute(
@@ -77,12 +77,25 @@ async def check_eligibility(
     points = balance.points if balance else 0
 
     # =========================
-    # 5️⃣ 21 JOURS DEPUIS INSCRIPTION
+    # 5️⃣ DAYS ACTIVE
     # =========================
     days_active = (datetime.utcnow() - current_user.created_at).days
 
     # =========================
-    # RESULTAT
+    # 6️⃣ LEVEL (Mining)
+    # =========================
+    stats = (
+        await db.execute(
+            select(UserMiningStats).where(
+                UserMiningStats.user_id == user_id
+            )
+        )
+    ).scalars().first()
+
+    level = stats.level if stats else 1
+
+    # =========================
+    # RESULT
     # =========================
     result = {
         "friends": friends_count >= 5,
@@ -90,20 +103,27 @@ async def check_eligibility(
         "tasks": tasks_completed >= 50,
         "points": points >= 50_000_000,
         "days": days_active >= 21,
+        "level": level >= 5,  # ✅ NOUVEAU CRITÈRE
+
         "details": {
             "friends_count": friends_count,
             "tasks_completed": tasks_completed,
             "points": int(points),
             "days_active": days_active,
+            "level": level,
         }
     }
 
+    # =========================
+    # ELIGIBILITY FINAL
+    # =========================
     result["eligible"] = all([
         result["friends"],
         result["pack"],
         result["tasks"],
         result["points"],
         result["days"],
+        result["level"],  # ✅ AJOUT
     ])
 
     return result

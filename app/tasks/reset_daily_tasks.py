@@ -6,11 +6,13 @@ from sqlalchemy import delete, update
 from app.database import AsyncSessionLocal
 from app.models import UserPack, UserDailyTask
 
-
 BENIN_TZ = pytz.timezone("Africa/Porto-Novo")
 
 
 async def reset_all_daily_tasks():
+    """
+    Réinitialise toutes les tâches quotidiennes et les packs utilisateurs.
+    """
     print("♻️ Réinitialisation des tâches quotidiennes...")
     async with AsyncSessionLocal() as db:
         try:
@@ -27,7 +29,8 @@ async def reset_all_daily_tasks():
                     last_claim_date=None,
                     total_earned=0,
                     pack_status="payé",
-                    is_unlocked=False
+                    is_unlocked=False,
+                    start_date=None  # ✅ Important pour que le bouton Start apparaisse
                 )
             )
             print("🔁 Colonnes user_pack réinitialisées.")
@@ -68,3 +71,12 @@ async def start_daily_reset_task():
 
         # Exécution du reset
         await reset_all_daily_tasks()
+
+
+# =========================
+# 🔹 Permet de tester le reset immédiatement
+# =========================
+if __name__ == "__main__":
+    import asyncio
+    print("⚡ Test du reset immédiat...")
+    asyncio.run(reset_all_daily_tasks())

@@ -186,7 +186,7 @@ async def claim_bonus(user_id: int, db: AsyncSession = Depends(get_async_session
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur introuvable")
 
-    await credit_wallet(user, float(CLAIM_AMOUNT), db)
+    await credit_wallet(user, Decimal(str(CLAIM_AMOUNT)), db)
 
     # 🔹 UPDATE BONUS
     bonus.points_restants -= CLAIM_AMOUNT
