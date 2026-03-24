@@ -4,6 +4,9 @@ from datetime import datetime
 from typing import Optional, List
 
 
+# =========================
+# ENUMS
+# =========================
 class ActionCategoryEnum(str, Enum):
     finance = "finance"
     immobilier = "immobilier"
@@ -21,6 +24,9 @@ class ActionStatusEnum(str, Enum):
     retire = "retire"
 
 
+# =========================
+# ACTION SCHEMAS
+# =========================
 class ActionBase(BaseModel):
     name: str
     category: ActionCategoryEnum
@@ -45,6 +51,9 @@ class ActionSchema(ActionBase):
     model_config = {"from_attributes": True}
 
 
+# =========================
+# USER ACTION SCHEMAS
+# =========================
 class UserActionBase(BaseModel):
     action_id: int
     quantity: int

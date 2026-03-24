@@ -1,8 +1,7 @@
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional, List
-from enum import Enum
-
+from .action_schemat import ActionCategoryEnum, ActionTypeEnum, ActionStatusEnum  # import relatif corrigé
 
 class UserPackSchema(BaseModel):
     id: int
@@ -16,13 +15,13 @@ class UserPackSchema(BaseModel):
     pack_status: Optional[str] = "payé"
 
     name: Optional[str] = None
-    category: Optional[Enum] = None
-    type: Optional[Enum] = None
+    category: Optional[ActionCategoryEnum] = None
+    type: Optional[ActionTypeEnum] = None
     total_parts: Optional[int] = None
     price_per_part: Optional[float] = None
     value_bkc: Optional[float] = None
     image_url: Optional[str] = None
-    status: Optional[Enum] = None
+    status: Optional[ActionStatusEnum] = None
 
     model_config = {"from_attributes": True}
 
