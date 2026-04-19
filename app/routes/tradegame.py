@@ -1,6 +1,8 @@
 import random
 import uuid
 import asyncio
+from asyncio import Lock
+
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,13 +29,10 @@ def generate_multiplier():
 
     if r < 0.8:
         return round(random.uniform(1.0, 5.0), 2)
-
     elif r < 0.9:
         return round(random.uniform(5.0, 20.0), 2)
-
     elif r < 0.97:
         return round(random.uniform(20.0, 100.0), 2)
-
     else:
         return round(random.uniform(100.0, 500.0), 2)
 
@@ -67,6 +66,7 @@ async def play_round(
     if balance < total_bet:
         raise HTTPException(400, "Solde insuffisant")
 
+    # ⚠️ transaction simple (pas parfaite mais OK pour début)
     if bet1 > 0:
         await balance_service.debit_balance(db, current_user.id, bet1)
 
@@ -84,8 +84,10 @@ async def play_round(
         "user_id": current_user.id,
         "logo": logo,
         "multiplier_max": multiplier_max,
+        "current_multiplier": 1.0,   # ✅ serveur contrôle
         "bets": {},
-        "finished": False
+        "finished": False,
+        "lock": Lock()               # ✅ protection race condition
     }
 
     if bet1 > 0:
@@ -107,14 +109,13 @@ async def play_round(
 
 
 # -------------------------
-# Cashout
+# Cashout sécurisé
 # -------------------------
 
 @router.post("/cashout")
 async def cashout(
     game_id: str,
     bet_key: str,
-    cashout_multiplier: float,
     db: AsyncSession = Depends(get_async_session),
     current_user: User = Depends(get_current_user)
 ):
@@ -127,46 +128,47 @@ async def cashout(
     if game["user_id"] != current_user.id:
         raise HTTPException(403, "Accès refusé")
 
-    if game["finished"]:
-        raise HTTPException(400, "Partie terminée")
+    async with game["lock"]:  # ✅ empêche double cashout
 
-    bet = game["bets"].get(bet_key)
+        if game["finished"]:
+            raise HTTPException(400, "Partie terminée")
 
-    if not bet:
-        raise HTTPException(400, "Mise invalide")
+        bet = game["bets"].get(bet_key)
 
-    if bet["cashed_out"]:
-        raise HTTPException(400, "Déjà encaissé")
+        if not bet:
+            raise HTTPException(400, "Mise invalide")
 
-    max_mult = game["multiplier_max"]
+        if bet["cashed_out"]:
+            raise HTTPException(400, "Déjà encaissé")
 
-    if cashout_multiplier > max_mult:
+        current = game["current_multiplier"]
+        max_mult = game["multiplier_max"]
+
+        if current > max_mult:
+            bet["cashed_out"] = True
+            bet["amount"] = 0
+
+            return {
+                "message": "Crash",
+                "gain": 0
+            }
+
+        gain = int(bet["amount"] * current)
+
+        if gain > MAX_GAIN:
+            gain = MAX_GAIN
 
         bet["cashed_out"] = True
-        bet["amount"] = 0
+
+        await balance_service.credit_balance(db, current_user.id, gain)
+        await db.commit()
 
         return {
-            "message": "Crash",
-            "gain": 0
+            "message": "Cashout réussi",
+            "bet": bet_key,
+            "multiplier": current,
+            "gain": gain
         }
-
-    gain = int(bet["amount"] * cashout_multiplier)
-
-    if gain > MAX_GAIN:
-        gain = MAX_GAIN
-
-    bet["cashed_out"] = True
-
-    await balance_service.credit_balance(db, current_user.id, gain)
-
-    await db.commit()
-
-    return {
-        "message": "Cashout réussi",
-        "bet": bet_key,
-        "multiplier": cashout_multiplier,
-        "gain": gain
-    }
 
 
 # -------------------------
@@ -188,7 +190,6 @@ async def game_progress(websocket: WebSocket, game_id: str):
     multiplier_max = game["multiplier_max"]
 
     try:
-
         current = 1.0
         base_step = 0.05
 
@@ -206,16 +207,15 @@ async def game_progress(websocket: WebSocket, game_id: str):
 
             current = round(current + step, 2)
 
+            # ✅ stock serveur
+            game["current_multiplier"] = current
+
             await websocket.send_json({
                 "multiplier": current
             })
 
-            sleep_time = max(
-                0.02,
-                0.1 - (current // 10) * 0.01 + random.uniform(-0.01, 0.01)
-            )
-
-            await asyncio.sleep(sleep_time)
+            # ✅ réduit charge serveur
+            await asyncio.sleep(0.1)
 
         game["finished"] = True
 
@@ -224,7 +224,10 @@ async def game_progress(websocket: WebSocket, game_id: str):
             "final_multiplier": multiplier_max
         })
 
-        await websocket.close()
-
     except WebSocketDisconnect:
         print(f"Client déconnecté du jeu {game_id}")
+
+    finally:
+        # ✅ cleanup mémoire
+        if game_id in active_games:
+            del active_games[game_id]

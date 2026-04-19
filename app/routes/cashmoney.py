@@ -2,10 +2,12 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import AsyncSessionLocal
+from app.database import get_async_session
 from app.models import RealCash, User
 from app.routers.auth import get_current_user
 
+# 🔥 cache
+from app.core.cache import cache_get, cache_set
 
 router = APIRouter(
     prefix="/wallet",
@@ -15,33 +17,47 @@ router = APIRouter(
 
 @router.get("/realcash")
 async def get_real_cash(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session)
 ):
-    """
-    Retourne le solde d'argent réel de l'utilisateur connecté.
-    Si aucune ligne n'existe encore en base → création automatique avec 0.
-    """
+    user_id = current_user.id
+    cache_key = f"realcash:{user_id}"
 
-    async with AsyncSessionLocal() as session:
+    # -----------------------------
+    # 🔥 1. CACHE
+    # -----------------------------
+    cached = await cache_get(cache_key)
+    if cached:
+        return cached
 
-        # 🔎 chercher le solde existant
-        result = await session.execute(
-            select(RealCash).where(RealCash.user_id == current_user.id)
+    # -----------------------------
+    # 🔥 2. DB QUERY
+    # -----------------------------
+    result = await db.execute(
+        select(RealCash).where(RealCash.user_id == user_id)
+    )
+    real_cash = result.scalars().first()
+
+    # -----------------------------
+    # 🔥 3. AUTO CREATE SAFE
+    # -----------------------------
+    if not real_cash:
+        real_cash = RealCash(
+            user_id=user_id,
+            cash_balance=0
         )
-        real_cash = result.scalars().first()
 
-        # 🧠 logique robuste : auto-création si absent
-        if not real_cash:
-            real_cash = RealCash(
-                user_id=current_user.id,
-                cash_balance=0
-            )
+        db.add(real_cash)
+        await db.commit()
+        await db.refresh(real_cash)
 
-            session.add(real_cash)
-            await session.commit()
-            await session.refresh(real_cash)
+    data = {
+        "cash_balance": float(real_cash.cash_balance)
+    }
 
-        # ✅ toujours une réponse valide
-        return {
-            "cash_balance": float(real_cash.cash_balance)
-        }
+    # -----------------------------
+    # 🔥 4. CACHE SET
+    # -----------------------------
+    await cache_set(cache_key, data, ttl=30)
+
+    return data

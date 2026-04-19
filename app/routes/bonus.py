@@ -6,6 +6,7 @@ from sqlalchemy import select, func
 from datetime import datetime, timedelta
 from typing import List, Dict
 from decimal import Decimal
+from app.core.cache import cache_get, cache_set, cache_delete
 
 from app.database import get_async_session
 from app.models import (
@@ -98,6 +99,14 @@ async def get_user_bonus(user_id: int, db: AsyncSession = Depends(get_async_sess
 @router.get("/{user_id}/status", response_model=Dict)
 async def get_bonus_status(user_id: int, db: AsyncSession = Depends(get_async_session)):
 
+    cache_key = f"bonus_status:{user_id}"
+
+    # 🔥 1. CACHE
+    cached = await cache_get(cache_key)
+    if cached:
+        return cached
+
+    # 🔥 2. DB
     bonus = (
         await db.execute(
             select(Bonus)
@@ -132,7 +141,7 @@ async def get_bonus_status(user_id: int, db: AsyncSession = Depends(get_async_se
                     status = "cooldown"
                     next_claim_at = next_allowed
 
-    return {
+    data = {
         "status": status,
         "total_points": float(bonus.total_points),
         "points_restants": float(bonus.points_restants),
@@ -141,6 +150,11 @@ async def get_bonus_status(user_id: int, db: AsyncSession = Depends(get_async_se
         "conditions": conditions,
         "claim_amount": float(CLAIM_AMOUNT),
     }
+
+    # 🔥 3. CACHE (TTL court car dynamique)
+    await cache_set(cache_key, data, ttl=15)
+
+    return data
 
 
 # ============================================================
@@ -197,6 +211,8 @@ async def claim_bonus(user_id: int, db: AsyncSession = Depends(get_async_session
         bonus.converti_le = datetime.utcnow()
 
     await db.commit()
+
+    await cache_delete(f"bonus_status:{user_id}")
 
     return {
         "message": "Bonus réclamé avec succès",

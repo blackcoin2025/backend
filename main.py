@@ -1,4 +1,3 @@
-# app/main.py
 import os
 import asyncio
 import logging
@@ -13,27 +12,36 @@ from fastapi.staticfiles import StaticFiles
 
 from app.database import engine, Base, AsyncSessionLocal
 from app.services.addtasks import add_sample_tasks
-from app.tasks.reset_daily_tasks import start_daily_reset_task  # ✅ seul import correct
-from app.routes import cashmoney  # ✅ ajouter ceci avec les autres imports
+
+# 🔥 RESET TASK
+from app.tasks.reset_daily_tasks import start_daily_reset_task
 
 from app.routes import (
     welcome, wallet, balance, user_profile, eligibility,
-    mining, minhistory, tasks, tradegame, bonus, actions
+    mining, minhistory, tasks, tradegame, bonus, actions, cashmoney
 )
 from app.routers import auth, auth_login, friends, luckygame
 from app.utils import cookies
 
-# -----------------------
-# Configuration logs
-# -----------------------
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger("uvicorn.error")
 
 # -----------------------
-# Création de l'app
+# ENV
+# -----------------------
+ENV = os.getenv("ENV", "dev")  # dev | prod | test
+
+
+# -----------------------
+# LOGS
+# -----------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+
+# -----------------------
+# APP
 # -----------------------
 app = FastAPI(
     title="BlackCoin API",
@@ -41,17 +49,22 @@ app = FastAPI(
     version="1.0.0"
 )
 
+
 # -----------------------
 # CORS
 # -----------------------
 frontend_origins = os.getenv("FRONTEND_URLS", "")
-origins = [origin.strip() for origin in frontend_origins.split(",") if origin.strip()]
+origins = [o.strip() for o in frontend_origins.split(",") if o.strip()]
 
-if not origins:
-    logger.warning("⚠️ Aucune origine CORS définie. Fallback sur http://localhost:5173 (dev).")
-    origins = ["http://localhost:5173"]
+if ENV == "dev":
+    if not origins:
+        logger.warning("⚠️ DEV: fallback sur localhost")
+        origins = ["http://localhost:5173"]
+else:
+    if not origins:
+        raise ValueError("❌ FRONTEND_URLS requis en production")
 
-logger.info(f"🌍 CORS Origins autorisées : {origins}")
+logger.info(f"🌍 CORS autorisées : {origins}")
 
 app.add_middleware(
     CORSMiddleware,
@@ -61,8 +74,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # -----------------------
-# Inclusion des routes
+# ROUTES
 # -----------------------
 app.include_router(auth.router)
 app.include_router(auth_login.router, prefix="/auth", tags=["Connexion"])
@@ -80,44 +94,52 @@ app.include_router(mining.router, prefix="/mining", tags=["Mining"])
 app.include_router(minhistory.router, prefix="/minhistory", tags=["Historique Mining"])
 app.include_router(tasks.router, prefix="/tasks", tags=["Tâches"])
 app.include_router(actions.router)
-app.include_router(eligibility.router)  # ✅ airdrop check
+app.include_router(eligibility.router)
+
 
 # -----------------------
-# Fichiers statiques
+# STATIC
 # -----------------------
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+
 # -----------------------
-# Gestion globale des erreurs
+# ERREURS GLOBALES
 # -----------------------
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    logger.exception("Erreur inattendue :")
+    logger.exception("❌ Erreur serveur")
     return JSONResponse(
         status_code=500,
-        content={"detail": "Erreur interne du serveur", "error": str(exc)}
+        content={"detail": "Erreur interne du serveur"}
     )
 
+
 # -----------------------
-# Startup
+# STARTUP
 # -----------------------
 @app.on_event("startup")
 async def startup():
-    logger.info("⚡ Initialisation du serveur BlackCoin...")
+    logger.info(f"⚡ Démarrage BlackCoin API [{ENV}]")
 
-    # 1️⃣ Création des tables si elles n'existent pas
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("✅ Tables vérifiées")
+    # -----------------------
+    # DEV INIT DB
+    # -----------------------
+    if ENV == "dev":
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("✅ Tables créées (dev)")
 
-    # 2️⃣ Ajout des tâches par défaut
-    async with AsyncSessionLocal() as session:
-        await add_sample_tasks(session)
-        logger.info("✅ Tâches par défaut prêtes")
+        async with AsyncSessionLocal() as session:
+            await add_sample_tasks(session)
+        logger.info("✅ Sample tasks ajoutées (dev)")
 
-    # 3️⃣ Lancement du reset automatique
-    try:
-        asyncio.create_task(start_daily_reset_task())  # ✅ important !
-        logger.info("♻️ Tâche de reset quotidienne démarrée (5 min loop pour test).")
-    except Exception as e:
-        logger.error(f"❌ Impossible de lancer le reset quotidien : {e}")
+    # -----------------------
+    # RESET TASK (SAFE)
+    # -----------------------
+    if ENV != "test":
+        try:
+            asyncio.create_task(start_daily_reset_task())
+            logger.info("♻️ Reset task scheduler lancé")
+        except Exception as e:
+            logger.error(f"❌ Reset scheduler error: {e}")

@@ -48,11 +48,11 @@ async def add_sample_tasks(db: AsyncSession):
 
     # ✅ Ici on fournit aussi le nom du logo
     sample_tasks = [
-        ("Telegram", "https://t.me/blackcoin202", 1000, "telegram.png"),
+        ("Telegram", "https://t.me/+2VYCu2Ygs0Q1YTk0", 1000, "telegram.png"),
         ("Facebook", "https://www.facebook.com/share/1BxkwKdPZL/", 1000, "facebook.png"),
         ("Twitter", "https://x.com/BlackcoinON", 1000, "twitter.png"),
         ("YouTube", "https://www.youtube.com/@Blackcoinchaine", 1000, "youtube.png"),
-        ("TikTok", "https://www.tiktok.com/@blackcoinsecurity", 1000, "tiktok.png"),
+        ("TikTok", "https://www.tiktok.com/@blackcoin_official", 1000, "tiktok.png"),
     ]
 
     for title, link, points, logo in sample_tasks:

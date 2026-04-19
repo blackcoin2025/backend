@@ -1,5 +1,5 @@
 from typing import List
-from datetime import datetime, timedelta
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -11,10 +11,14 @@ from app.dependencies.auth import get_current_user
 from app.services.cash_service import debit_real_cash
 from app.services.pack_service import start_pack, claim_pack_reward
 
+# 🔥 cache
+from app.core.cache import cache_get, cache_set, cache_delete
+
 router = APIRouter(prefix="/actions", tags=["Actions"])
 
+
 # -----------------------
-# 🧱 Créer une nouvelle Action (Pack)
+# CREATE ACTION
 # -----------------------
 @router.post("/", response_model=ActionSchema)
 async def create_action(
@@ -22,15 +26,7 @@ async def create_action(
     db: AsyncSession = Depends(get_async_session),
     current_user: User = Depends(get_current_user)
 ):
-    new_action = Action(
-        name=payload.name,
-        category=payload.category,
-        type=payload.type,
-        total_parts=payload.total_parts,
-        price_per_part=payload.price_per_part,
-        value_bkc=payload.value_bkc,
-        image_url=payload.image_url,
-    )
+    new_action = Action(**payload.dict())
     db.add(new_action)
     await db.commit()
     await db.refresh(new_action)
@@ -38,7 +34,7 @@ async def create_action(
 
 
 # -----------------------
-# 📋 Lister toutes les actions (packs)
+# LIST ALL
 # -----------------------
 @router.get("/", response_model=List[ActionSchema])
 async def list_actions(db: AsyncSession = Depends(get_async_session)):
@@ -47,27 +43,37 @@ async def list_actions(db: AsyncSession = Depends(get_async_session)):
 
 
 # -----------------------
-# 🔍 Lister les actions par catégorie
+# CATEGORY (CACHE)
 # -----------------------
 @router.get("/category/{category}", response_model=List[ActionSchema])
 async def list_actions_by_category(category: str, db: AsyncSession = Depends(get_async_session)):
+    cache_key = f"actions_category:{category}"
+
+    cached = await cache_get(cache_key)
+    if cached:
+        return cached
+
     result = await db.execute(select(Action).where(Action.category == category))
-    return result.scalars().all()
+    data = result.scalars().all()
+
+    await cache_set(cache_key, data, ttl=120)
+    return data
 
 
 # -----------------------
-# 💰 Acheter un pack
+# BUY PACK
 # -----------------------
 @router.post("/buy/{action_id}", response_model=UserPackSchema)
 async def buy_pack(
     action_id: int,
     db: AsyncSession = Depends(get_async_session),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     result = await db.execute(select(Action).where(Action.id == action_id))
     pack = result.scalars().first()
+
     if not pack:
-        raise HTTPException(status_code=404, detail="Pack introuvable")
+        raise HTTPException(404, "Pack introuvable")
 
     existing = await db.execute(
         select(UserPack).where(
@@ -76,47 +82,56 @@ async def buy_pack(
         )
     )
     if existing.scalars().first():
-        raise HTTPException(status_code=400, detail="Ce pack a déjà été acheté")
+        raise HTTPException(400, "Pack déjà acheté")
 
-    try:
-        await debit_real_cash(current_user, pack.price_usdt, db)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    await debit_real_cash(current_user, pack.price_usdt, db)
 
-    daily_earnings = round(float(pack.price_per_part) * 0.012, 6)
     user_pack = UserPack(
         user_id=current_user.id,
         pack_id=action_id,
         start_date=None,
-        daily_earnings=daily_earnings,
+        daily_earnings=round(float(pack.price_per_part) * 0.012, 6),
         total_earned=0,
         is_unlocked=False,
         pack_status="payé"
     )
+
     db.add(user_pack)
     await db.commit()
     await db.refresh(user_pack)
+
+    # 🔥 INVALIDATION
+    await cache_delete(f"user_packs:{current_user.id}")
+    await cache_delete(f"actions_category:{pack.category}")
+
     return user_pack
 
 
 # -----------------------
-# 📦 Lister les packs achetés
+# MY PACKS (CACHE)
 # -----------------------
 @router.get("/my-packs", response_model=List[UserPackSchema])
 async def get_my_packs(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session)
 ):
+    user_id = current_user.id
+    cache_key = f"user_packs:{user_id}"
+
+    cached = await cache_get(cache_key)
+    if cached:
+        return cached
+
     result = await db.execute(
         select(UserPack, Action)
         .join(Action, UserPack.pack_id == Action.id)
-        .where(UserPack.user_id == current_user.id)
+        .where(UserPack.user_id == user_id)
     )
-    rows = result.all()
 
+    rows = result.all()
     enriched = []
+
     for user_pack, action in rows:
-        status = getattr(user_pack, "pack_status", "payé" if not user_pack.start_date else "en_cours")
         enriched.append({
             **user_pack.__dict__,
             "name": action.name,
@@ -124,13 +139,15 @@ async def get_my_packs(
             "type": action.type.value,
             "image_url": action.image_url,
             "status": action.status.value,
-            "pack_status": status,
+            "pack_status": user_pack.pack_status,
         })
+
+    await cache_set(cache_key, enriched, ttl=60)
     return enriched
 
 
 # -----------------------
-# 🚀 Démarrer un pack (Start)
+# START PACK
 # -----------------------
 @router.post("/start/{user_pack_id}", response_model=UserPackSchema)
 async def start_user_pack(
@@ -138,11 +155,14 @@ async def start_user_pack(
     db: AsyncSession = Depends(get_async_session),
     current_user: User = Depends(get_current_user)
 ):
-    return await start_pack(current_user.id, user_pack_id, db)
+    result = await start_pack(current_user.id, user_pack_id, db)
+
+    await cache_delete(f"user_packs:{current_user.id}")
+    return result
 
 
 # -----------------------
-# 📋 Lister les tâches journalières
+# DAILY TASKS (CACHE SAFE)
 # -----------------------
 @router.get("/packs/{user_pack_id}/daily-tasks")
 async def get_user_pack_daily_tasks(
@@ -150,7 +170,12 @@ async def get_user_pack_daily_tasks(
     db: AsyncSession = Depends(get_async_session),
     current_user: User = Depends(get_current_user)
 ):
-    # 1️⃣ Vérifie le pack
+    cache_key = f"pack_tasks:{user_pack_id}"
+
+    cached = await cache_get(cache_key)
+    if cached:
+        return cached
+
     result = await db.execute(
         select(UserPack).where(
             UserPack.id == user_pack_id,
@@ -158,23 +183,21 @@ async def get_user_pack_daily_tasks(
         )
     )
     user_pack = result.scalars().first()
-    if not user_pack:
-        raise HTTPException(status_code=404, detail="Pack introuvable pour cet utilisateur")
 
-    # 2️⃣ Tâches existantes ?
+    if not user_pack:
+        raise HTTPException(404, "Pack introuvable")
+
+    # création tasks si absentes
     existing = await db.execute(
         select(UserDailyTask).where(UserDailyTask.user_pack_id == user_pack.id)
     )
     user_tasks = existing.scalars().all()
 
-    # 3️⃣ Sinon, créer à partir des DailyTask
     if not user_tasks:
         base_q = await db.execute(
             select(DailyTask).where(DailyTask.pack_id == user_pack.pack_id)
         )
         base_tasks = base_q.scalars().all()
-        if not base_tasks:
-            raise HTTPException(status_code=404, detail="Aucune tâche disponible pour ce pack")
 
         for t in base_tasks:
             db.add(UserDailyTask(
@@ -182,47 +205,39 @@ async def get_user_pack_daily_tasks(
                 task_id=t.id,
                 user_pack_id=user_pack.id,
                 completed=False,
-                completed_at=None,
             ))
         await db.commit()
 
-    # 4️⃣ Jointure enrichie
     joined = await db.execute(
         select(UserDailyTask, DailyTask)
         .join(DailyTask, DailyTask.id == UserDailyTask.task_id)
         .where(UserDailyTask.user_pack_id == user_pack.id)
     )
-    data = joined.all()
 
-    # 5️⃣ Construction de la réponse
     tasks = []
-    for ut, dt in data:
-        cooldown = 3600  # ⏱️ 1 heure (en secondes)
+    for ut, dt in joined.all():
         time_left = 0
-
         if ut.started_at:
             elapsed = (datetime.utcnow() - ut.started_at).total_seconds()
-            time_left = max(0, cooldown - elapsed)
+            time_left = max(0, 3600 - elapsed)
 
         tasks.append({
             "id": ut.id,
             "task_id": ut.task_id,
-            "user_pack_id": ut.user_pack_id,
             "completed": ut.completed,
-            "completed_at": ut.completed_at,
             "started_at": ut.started_at,
             "description": dt.description,
             "platform": dt.platform,
             "video_url": dt.video_url,
-            "reward_share": dt.reward_share,
             "time_left": time_left,
         })
 
+    await cache_set(cache_key, tasks, ttl=30)
     return tasks
 
 
 # -----------------------
-# ▶️ Démarrer une tâche
+# START TASK
 # -----------------------
 @router.post("/packs/daily-tasks/{task_id}/start")
 async def start_task(
@@ -231,23 +246,29 @@ async def start_task(
     db: AsyncSession = Depends(get_async_session),
 ):
     result = await db.execute(
-        select(UserDailyTask)
-        .where(UserDailyTask.id == task_id, UserDailyTask.user_id == current_user.id)
+        select(UserDailyTask).where(
+            UserDailyTask.id == task_id,
+            UserDailyTask.user_id == current_user.id
+        )
     )
     task = result.scalars().first()
+
     if not task:
-        raise HTTPException(status_code=404, detail="Tâche introuvable")
+        raise HTTPException(404, "Tâche introuvable")
 
     if not task.started_at:
         task.started_at = datetime.utcnow()
         await db.commit()
         await db.refresh(task)
 
+    # 🔥 INVALIDATION
+    await cache_delete(f"pack_tasks:{task.user_pack_id}")
+
     return {"status": "started", "started_at": task.started_at}
 
 
 # -----------------------
-# ✅ Compléter une tâche
+# COMPLETE TASK
 # -----------------------
 @router.post("/packs/daily-tasks/{task_id}/complete")
 async def complete_task(
@@ -262,34 +283,22 @@ async def complete_task(
         )
     )
     task = res.scalars().first()
+
     if not task:
-        raise HTTPException(status_code=404, detail="Tâche introuvable")
+        raise HTTPException(404, "Tâche introuvable")
 
     task.completed = True
     task.completed_at = datetime.utcnow()
-    db.add(task)
     await db.commit()
 
-    # Vérifie si toutes les tâches du pack sont finies
-    res2 = await db.execute(
-        select(UserDailyTask).where(UserDailyTask.user_pack_id == task.user_pack_id)
-    )
-    all_tasks = res2.scalars().all()
-    if all(t.completed for t in all_tasks):
-        res_pack = await db.execute(select(UserPack).where(UserPack.id == task.user_pack_id))
-        user_pack = res_pack.scalars().first()
-        if user_pack:
-            user_pack.all_tasks_completed = True
-            user_pack.is_unlocked = True
-            db.add(user_pack)
-            await db.commit()
+    # 🔥 INVALIDATION
+    await cache_delete(f"pack_tasks:{task.user_pack_id}")
 
-    await db.refresh(task)
     return {"message": "✅ Tâche complétée", "task_id": task.id}
 
 
 # -----------------------
-# 💰 Réclamer les gains
+# CLAIM
 # -----------------------
 @router.post("/claim/{user_pack_id}")
 async def claim_reward(
@@ -297,30 +306,18 @@ async def claim_reward(
     db: AsyncSession = Depends(get_async_session),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Permet à l'utilisateur de réclamer les gains d'un pack
-    après avoir complété toutes les tâches et respecté le délai.
-    """
+    result = await claim_pack_reward(
+        user_id=current_user.id,
+        user_pack_id=user_pack_id,
+        db=db,
+    )
 
-    try:
-        result = await claim_pack_reward(
-            user_id=current_user.id,
-            user_pack_id=user_pack_id,
-            db=db,
-        )
+    # 🔥 INVALIDATION
+    await cache_delete(f"user_packs:{current_user.id}")
+    await cache_delete(f"pack_tasks:{user_pack_id}")
 
-        return {
-            "status": "success",
-            **result,  # 🔥 on retourne directement ce que renvoie le service
-            "timestamp": datetime.utcnow().isoformat(),
-        }
-
-    except HTTPException:
-        # On laisse FastAPI gérer les erreurs métier propres
-        raise
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail="Erreur interne pendant la réclamation.",
-        )
+    return {
+        "status": "success",
+        **result,
+        "timestamp": datetime.utcnow().isoformat(),
+    }

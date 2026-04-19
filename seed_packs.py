@@ -23,11 +23,11 @@ PACKS = [
 ]
 
 TASK_LINKS = [
-    {"platform": "Telegram", "description": "Rejoignez notre canal Telegram officiel.", "video_url": "https://t.me/+VXuf93TxzKxlMzE0"},
+    {"platform": "Telegram", "description": "Rejoignez notre canal Telegram officiel.", "video_url": "https://t.me/+2VYCu2Ygs0Q1YTk0"},
     {"platform": "Facebook", "description": "Partagez et aimez notre page Facebook.", "video_url": "https://www.facebook.com/share/1CjsWSj1P3/"},
     {"platform": "Twitter (X)", "description": "Suivez notre compte officiel sur X.", "video_url": "https://x.com/BlackcoinON"},
     {"platform": "YouTube", "description": "Abonnez-vous à notre chaîne YouTube officielle.", "video_url": "https://www.youtube.com/@Blackcoinchaine"},
-    {"platform": "TikTok", "description": "Regardez et aimez nos vidéos TikTok.", "video_url": "https://www.tiktok.com/@blackcoinsecurity"},
+    {"platform": "TikTok", "description": "Regardez et aimez nos vidéos TikTok.", "video_url": "https://www.tiktok.com/@blackcoin_official"},
 ]
 
 async def seed_packs():

@@ -1,5 +1,3 @@
-# app/routes/eligibility.py
-
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, distinct
@@ -12,9 +10,12 @@ from app.models import (
     UserPack,
     UserTask,
     Balance,
-    UserMiningStats,  # ✅ AJOUT
+    UserMiningStats,
 )
 from app.dependencies.auth import get_current_user
+
+# 🔥 cache
+from app.core.cache import cache_get, cache_set
 
 router = APIRouter(prefix="/eligibility", tags=["Airdrop"])
 
@@ -25,15 +26,21 @@ async def check_eligibility(
     db: AsyncSession = Depends(get_async_session),
 ):
     user_id = current_user.id
+    cache_key = f"eligibility:{user_id}"
+
+    # -------------------------
+    # 🔥 CACHE
+    # -------------------------
+    cached = await cache_get(cache_key)
+    if cached:
+        return cached
 
     # =========================
-    # 1️⃣ FRIENDS (>=5)
+    # FRIENDS
     # =========================
     friends_count = (
         await db.execute(
-            select(func.count())
-            .select_from(Friend)
-            .where(
+            select(func.count()).select_from(Friend).where(
                 Friend.user_id == user_id,
                 Friend.status == "accepted",
             )
@@ -41,7 +48,7 @@ async def check_eligibility(
     ).scalar() or 0
 
     # =========================
-    # 2️⃣ PACK PAYÉ
+    # PACK
     # =========================
     has_pack = (
         await db.execute(
@@ -53,12 +60,11 @@ async def check_eligibility(
     ).first() is not None
 
     # =========================
-    # 3️⃣ 50 TASKS DISTINCT
+    # TASKS
     # =========================
     tasks_completed = (
         await db.execute(
-            select(func.count(distinct(UserTask.task_id)))
-            .where(
+            select(func.count(distinct(UserTask.task_id))).where(
                 UserTask.user_id == user_id,
                 UserTask.completed == True,
             )
@@ -66,7 +72,7 @@ async def check_eligibility(
     ).scalar() or 0
 
     # =========================
-    # 4️⃣ POINTS
+    # POINTS
     # =========================
     balance = (
         await db.execute(
@@ -77,12 +83,12 @@ async def check_eligibility(
     points = balance.points if balance else 0
 
     # =========================
-    # 5️⃣ DAYS ACTIVE
+    # DAYS
     # =========================
     days_active = (datetime.utcnow() - current_user.created_at).days
 
     # =========================
-    # 6️⃣ LEVEL (Mining)
+    # LEVEL
     # =========================
     stats = (
         await db.execute(
@@ -103,7 +109,7 @@ async def check_eligibility(
         "tasks": tasks_completed >= 50,
         "points": points >= 50_000_000,
         "days": days_active >= 21,
-        "level": level >= 5,  # ✅ NOUVEAU CRITÈRE
+        "level": level >= 5,
 
         "details": {
             "friends_count": friends_count,
@@ -114,16 +120,18 @@ async def check_eligibility(
         }
     }
 
-    # =========================
-    # ELIGIBILITY FINAL
-    # =========================
     result["eligible"] = all([
         result["friends"],
         result["pack"],
         result["tasks"],
         result["points"],
         result["days"],
-        result["level"],  # ✅ AJOUT
+        result["level"],
     ])
+
+    # -------------------------
+    # 🔥 CACHE SET
+    # -------------------------
+    await cache_set(cache_key, result, ttl=400)
 
     return result
