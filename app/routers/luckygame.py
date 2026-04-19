@@ -13,7 +13,6 @@ from app.services import balance_service
 from app.routers.auth import get_current_user
 from app.models import User
 
-# 🔥 IMPORT CENTRALISÉ (IMPORTANT)
 from app.core.cache import redis_client
 
 GAME_TTL = 300
@@ -100,7 +99,7 @@ def generate_multipliers_for_tier(tier: int) -> List[float]:
 
 
 # ----------------------
-# Start
+# START GAME (SECURE)
 # ----------------------
 
 @router.post("/start")
@@ -139,12 +138,12 @@ async def start_game(
         "game_id": game_id,
         "level": 1,
         "reward": req.bet,
-        "multipliers": game_data["multipliers"]
+        "cards": [None, None, None, None]  # 🔒 rien révélé
     }
 
 
 # ----------------------
-# Play
+# PLAY (SECURE)
 # ----------------------
 
 @router.post("/play")
@@ -190,7 +189,8 @@ async def play_level(
 
             return {
                 "result": "lose",
-                "multipliers": multipliers,
+                "selected_index": req.choice_index,
+                "selected_value": 0,
                 "reward": 0,
                 "level": game["level"]
             }
@@ -202,17 +202,14 @@ async def play_level(
         game["level"] += 1
 
         tier = map_level_to_tier(game["level"])
-        next_multipliers = generate_multipliers_for_tier(tier)
-
-        game["multipliers"] = next_multipliers
+        game["multipliers"] = generate_multipliers_for_tier(tier)
 
         await redis_client.setex(key, GAME_TTL, json.dumps(game))
 
         return {
             "result": "continue",
-            "chosen_multiplier": chosen,
-            "multipliers": multipliers,
-            "next_multipliers": next_multipliers,
+            "selected_index": req.choice_index,
+            "selected_value": chosen,
             "reward": int(reward),
             "level": game["level"]
         }
@@ -222,7 +219,7 @@ async def play_level(
 
 
 # ----------------------
-# Cashout
+# CASHOUT
 # ----------------------
 
 @router.post("/cashout")
