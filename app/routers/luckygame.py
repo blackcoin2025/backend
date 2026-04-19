@@ -1,6 +1,9 @@
+import json
+import uuid
 import random
-import time
+import secrets
 from typing import List
+
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
@@ -10,12 +13,13 @@ from app.services import balance_service
 from app.routers.auth import get_current_user
 from app.models import User
 
-router = APIRouter(prefix="/luckygame", tags=["LuckyGame"])
+# 🔥 IMPORT CENTRALISÉ (IMPORTANT)
+from app.core.cache import redis_client
 
-# stockage temporaire des parties
-games = {}
-
+GAME_TTL = 300
 MAX_REWARD = 5_000_000
+
+router = APIRouter(prefix="/luckygame", tags=["LuckyGame"])
 
 
 # ----------------------
@@ -36,7 +40,7 @@ class CashoutRequest(BaseModel):
 
 
 # ----------------------
-# Configuration des niveaux
+# Config niveaux
 # ----------------------
 
 TIERS = {
@@ -52,6 +56,10 @@ TIERS = {
 # Helpers
 # ----------------------
 
+def generate_game_id():
+    return str(uuid.uuid4())
+
+
 def map_level_to_tier(level: int) -> int:
     if level <= 5:
         return 1
@@ -64,29 +72,27 @@ def map_level_to_tier(level: int) -> int:
     return 5
 
 
+def secure_random(min_v: float, max_v: float) -> float:
+    return round(min_v + (max_v - min_v) * secrets.randbelow(10000) / 10000, 2)
+
+
 def generate_unique_multiplier(existing: List[float], min_v: float, max_v: float) -> float:
     for _ in range(10):
-        m = round(random.uniform(min_v, max_v), 2)
+        m = secure_random(min_v, max_v)
         if m not in existing:
             return m
-    return round(random.uniform(min_v, max_v), 2)
+    return secure_random(min_v, max_v)
 
 
 def generate_multipliers_for_tier(tier: int) -> List[float]:
     cfg = TIERS[tier]
 
-    winners = []
-    for _ in range(cfg["winners"]):
-        winners.append(
-            generate_unique_multiplier(
-                winners,
-                cfg["min_mult"],
-                cfg["max_mult"]
-            )
-        )
+    winners = [
+        generate_unique_multiplier([], cfg["min_mult"], cfg["max_mult"])
+        for _ in range(cfg["winners"])
+    ]
 
     losers = [0.0] * (4 - cfg["winners"])
-
     result = winners + losers
     random.shuffle(result)
 
@@ -94,7 +100,7 @@ def generate_multipliers_for_tier(tier: int) -> List[float]:
 
 
 # ----------------------
-# Start game
+# Start
 # ----------------------
 
 @router.post("/start")
@@ -103,6 +109,8 @@ async def start_game(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session)
 ):
+    if not redis_client:
+        raise HTTPException(500, "Redis indisponible")
 
     if req.bet <= 0:
         raise HTTPException(400, "Mise invalide")
@@ -112,32 +120,31 @@ async def start_game(
     if balance < req.bet:
         raise HTTPException(400, "Solde insuffisant")
 
-    # débit
     await balance_service.debit_balance(db, current_user.id, req.bet)
     await db.commit()
 
-    game_id = str(time.time_ns())
+    game_id = generate_game_id()
 
-    games[game_id] = {
+    game_data = {
         "user_id": current_user.id,
-        "current_level": 1,
-        "current_reward": float(req.bet),
+        "level": 1,
+        "reward": float(req.bet),
         "active": True,
         "multipliers": generate_multipliers_for_tier(1)
     }
 
-    game = games[game_id]
+    await redis_client.setex(f"game:{game_id}", GAME_TTL, json.dumps(game_data))
 
     return {
         "game_id": game_id,
-        "level": game["current_level"],
-        "reward": int(game["current_reward"]),
-        "multipliers": game["multipliers"]
+        "level": 1,
+        "reward": req.bet,
+        "multipliers": game_data["multipliers"]
     }
 
 
 # ----------------------
-# Play level
+# Play
 # ----------------------
 
 @router.post("/play")
@@ -145,61 +152,73 @@ async def play_level(
     req: PlayRequest,
     current_user: User = Depends(get_current_user)
 ):
+    if not redis_client:
+        raise HTTPException(500, "Redis indisponible")
 
-    game = games.get(req.game_id)
+    key = f"game:{req.game_id}"
+    lock_key = f"lock:{req.game_id}"
 
-    if not game:
-        raise HTTPException(400, "Partie introuvable")
+    if not await redis_client.set(lock_key, "1", ex=5, nx=True):
+        raise HTTPException(429, "Action en cours")
 
-    if not game["active"]:
-        raise HTTPException(400, "Partie terminée")
+    try:
+        data = await redis_client.get(key)
 
-    if game["user_id"] != current_user.id:
-        raise HTTPException(403, "Accès refusé")
+        if not data:
+            raise HTTPException(400, "Partie introuvable")
 
-    if req.choice_index not in [0, 1, 2, 3]:
-        raise HTTPException(400, "Choix invalide")
+        game = json.loads(data)
 
-    multipliers = game["multipliers"]
+        if not game["active"]:
+            raise HTTPException(400, "Partie terminée")
 
-    chosen = float(multipliers[req.choice_index])
+        if game["user_id"] != current_user.id:
+            raise HTTPException(403, "Accès refusé")
 
-    # perdant
-    if chosen == 0.0:
+        if req.choice_index not in [0, 1, 2, 3]:
+            raise HTTPException(400, "Choix invalide")
 
-        game["active"] = False
-        game["current_reward"] = 0
+        multipliers = game["multipliers"]
+        chosen = float(multipliers[req.choice_index])
+
+        # ❌ LOSE
+        if chosen == 0.0:
+            game["active"] = False
+            game["reward"] = 0
+
+            await redis_client.setex(key, GAME_TTL, json.dumps(game))
+
+            return {
+                "result": "lose",
+                "multipliers": multipliers,
+                "reward": 0,
+                "level": game["level"]
+            }
+
+        # ✅ WIN
+        reward = min(game["reward"] * chosen, MAX_REWARD)
+
+        game["reward"] = reward
+        game["level"] += 1
+
+        tier = map_level_to_tier(game["level"])
+        next_multipliers = generate_multipliers_for_tier(tier)
+
+        game["multipliers"] = next_multipliers
+
+        await redis_client.setex(key, GAME_TTL, json.dumps(game))
 
         return {
-            "result": "lose",
+            "result": "continue",
+            "chosen_multiplier": chosen,
             "multipliers": multipliers,
-            "reward": 0,
-            "level": game["current_level"]
+            "next_multipliers": next_multipliers,
+            "reward": int(reward),
+            "level": game["level"]
         }
 
-    # gagnant
-    reward = game["current_reward"] * chosen
-
-    if reward > MAX_REWARD:
-        reward = float(MAX_REWARD)
-
-    game["current_reward"] = reward
-    game["current_level"] += 1
-
-    tier = map_level_to_tier(game["current_level"])
-
-    next_multipliers = generate_multipliers_for_tier(tier)
-
-    game["multipliers"] = next_multipliers
-
-    return {
-        "result": "continue",
-        "chosen_multiplier": chosen,
-        "multipliers": multipliers,
-        "next_multipliers": next_multipliers,
-        "reward": int(reward),
-        "level": game["current_level"]
-    }
+    finally:
+        await redis_client.delete(lock_key)
 
 
 # ----------------------
@@ -212,35 +231,43 @@ async def cashout(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session)
 ):
+    if not redis_client:
+        raise HTTPException(500, "Redis indisponible")
 
-    game = games.get(req.game_id)
+    key = f"game:{req.game_id}"
+    lock_key = f"lock:{req.game_id}"
 
-    if not game:
-        raise HTTPException(400, "Partie introuvable")
+    if not await redis_client.set(lock_key, "1", ex=5, nx=True):
+        raise HTTPException(429, "Action en cours")
 
-    if not game["active"]:
-        raise HTTPException(400, "Partie déjà terminée")
+    try:
+        data = await redis_client.get(key)
 
-    if game["user_id"] != current_user.id:
-        raise HTTPException(403, "Accès refusé")
+        if not data:
+            raise HTTPException(400, "Partie introuvable")
 
-    # bloquer immédiatement la partie
-    game["active"] = False
+        game = json.loads(data)
 
-    reward = int(game["current_reward"])
+        if not game["active"]:
+            raise HTTPException(400, "Déjà terminé")
 
-    if reward <= 0:
-        raise HTTPException(400, "Récompense invalide")
+        if game["user_id"] != current_user.id:
+            raise HTTPException(403, "Accès refusé")
 
-    if reward > MAX_REWARD:
-        reward = MAX_REWARD
+        reward = int(min(game["reward"], MAX_REWARD))
 
-    # crédit
-    await balance_service.credit_balance(db, current_user.id, reward)
+        if reward <= 0:
+            raise HTTPException(400, "Récompense invalide")
 
-    await db.commit()
+        await balance_service.credit_balance(db, current_user.id, reward)
+        await db.commit()
 
-    return {
-        "reward": reward,
-        "message": "Encaissement effectué"
-    }
+        await redis_client.delete(key)
+
+        return {
+            "reward": reward,
+            "message": "Encaissement effectué"
+        }
+
+    finally:
+        await redis_client.delete(lock_key)
