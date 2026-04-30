@@ -1,7 +1,7 @@
 import os
 import smtplib
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -93,7 +93,7 @@ def send_verification_email(to_email: str, code: str):
 
 # ✅ Enregistre temporairement l'utilisateur et envoie le code
 async def process_registration(form: RegisterRequest, session: AsyncSession):
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     email = form.email.strip().lower()
     username = form.username.strip().lower()
 

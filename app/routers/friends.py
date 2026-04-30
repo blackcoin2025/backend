@@ -1,8 +1,6 @@
-# app/routers/friends.py
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, distinct
 from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 import uuid
@@ -14,16 +12,14 @@ from app.models import User, Friend, PromoCode
 from app.dependencies.auth import get_current_user
 from app.services.rewards import reward_referrer
 
-# 🔥 cache
 from app.core.cache import cache_get, cache_set, cache_delete
-
 
 router = APIRouter(prefix="/friends", tags=["Friends"])
 
 
-# --------------------------
+# =========================
 # SCHEMAS
-# --------------------------
+# =========================
 class ApplyCodeRequest(BaseModel):
     code: str
 
@@ -33,9 +29,9 @@ class FriendResponse(BaseModel):
     friends: List[str]
 
 
-# --------------------------
+# =========================
 # GENERATE CODE
-# --------------------------
+# =========================
 @router.post("/generate-code")
 async def generate_code(
     current_user: User = Depends(get_current_user),
@@ -69,15 +65,12 @@ async def generate_code(
         except IntegrityError:
             await db.rollback()
 
-    raise HTTPException(
-        status_code=500,
-        detail="Impossible de générer un code unique."
-    )
+    raise HTTPException(500, "Unable to generate a unique code.")
 
 
-# --------------------------
+# =========================
 # APPLY CODE
-# --------------------------
+# =========================
 @router.post("/apply-code", response_model=FriendResponse)
 async def apply_code(
     payload: ApplyCodeRequest,
@@ -89,7 +82,6 @@ async def apply_code(
 
     async with db.begin():
 
-        # 🔥 LOCK promo
         promo = (
             await db.execute(
                 select(PromoCode)
@@ -102,12 +94,11 @@ async def apply_code(
         ).scalar_one_or_none()
 
         if not promo:
-            raise HTTPException(400, "Code promo invalide")
+            raise HTTPException(400, "Invalid promo code")
 
         if promo.user_id == user_id:
-            raise HTTPException(400, "Tu ne peux pas utiliser ton propre code")
+            raise HTTPException(400, "You cannot use your own code")
 
-        # 🔥 LOCK friend
         existing = (
             await db.execute(
                 select(Friend)
@@ -120,14 +111,12 @@ async def apply_code(
         ).scalar_one_or_none()
 
         if existing:
-            raise HTTPException(400, "Vous êtes déjà amis")
+            raise HTTPException(400, "Already referred")
 
-        # 🔥 usage limit
         if promo.usage_limit > 0 and promo.used_count >= promo.usage_limit:
             promo.is_active = False
-            raise HTTPException(400, "Ce code promo n'est plus valide")
+            raise HTTPException(400, "Promo code expired")
 
-        # 🔥 créer relation
         db.add(
             Friend(
                 user_id=user_id,
@@ -136,27 +125,28 @@ async def apply_code(
             )
         )
 
-        # 🔥 update promo
         promo.used_count += 1
 
         if promo.usage_limit > 0 and promo.used_count >= promo.usage_limit:
             promo.is_active = False
 
-        # 🔥 reward
         await reward_referrer(
             db,
             promo_code=code,
             new_user=current_user
         )
 
-    # 🔥 IMPORTANT : invalidation cache
+    # 🔥 cache invalidate
     await cache_delete(f"friends:{user_id}")
 
-    # 🔥 re-fetch data (hors transaction)
+    # 🔥 FETCH CLEAN (DISTINCT)
     friends_result = await db.execute(
-        select(User.username)
+        select(distinct(User.username))
         .join(Friend, Friend.friend_id == User.id)
-        .where(Friend.user_id == user_id)
+        .where(
+            Friend.user_id == user_id,
+            Friend.status == "accepted"
+        )
     )
     friends_list = friends_result.scalars().all()
 
@@ -171,9 +161,9 @@ async def apply_code(
     }
 
 
-# --------------------------
+# =========================
 # GET MY FRIENDS (CACHE)
-# --------------------------
+# =========================
 @router.get("/me", response_model=FriendResponse)
 async def get_my_friends(
     current_user: User = Depends(get_current_user),
@@ -182,14 +172,12 @@ async def get_my_friends(
     user_id = current_user.id
     cache_key = f"friends:{user_id}"
 
-    # 🔥 CACHE
     cached = await cache_get(cache_key)
     if cached:
         return cached
 
-    # 🔥 DB
     friends_result = await db.execute(
-        select(User.username)
+        select(distinct(User.username))
         .join(Friend, User.id == Friend.friend_id)
         .where(
             Friend.user_id == user_id,
@@ -208,24 +196,26 @@ async def get_my_friends(
         "friends": friends_list
     }
 
-    # 🔥 CACHE SET
     await cache_set(cache_key, data, ttl=60)
 
     return data
 
 
-# --------------------------
-# OPTIONAL (⚠️ à sécuriser)
-# --------------------------
+# =========================
+# OPTIONAL (SECURE LATER)
+# =========================
 @router.get("/my-friends/{user_id}")
 async def get_friends_by_user_id(
     user_id: int,
     db: AsyncSession = Depends(get_async_session)
 ):
     result = await db.execute(
-        select(User.username)
+        select(distinct(User.username))
         .join(Friend, Friend.friend_id == User.id)
-        .where(Friend.user_id == user_id)
+        .where(
+            Friend.user_id == user_id,
+            Friend.status == "accepted"
+        )
     )
     friends_list = result.scalars().all()
 

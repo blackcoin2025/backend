@@ -24,7 +24,11 @@ class UserTask(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
-    started_at = Column(DateTime, nullable=True)
+
+    # ✅ FIX ICI AUSSI
+    started_at = Column(DateTime(timezone=True), nullable=True)
     completed = Column(Boolean, default=False, nullable=False)
-    completed_at = Column(DateTime)
-    created_at = Column(DateTime, server_default=func.now())
+    completed_at = Column(DateTime(timezone=True))
+
+    # ⚠️ optionnel mais recommandé
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

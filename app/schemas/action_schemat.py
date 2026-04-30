@@ -1,6 +1,6 @@
 from pydantic import BaseModel, computed_field
 from enum import Enum
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 
 
@@ -9,19 +9,19 @@ from typing import Optional, List
 # =========================
 class ActionCategoryEnum(str, Enum):
     finance = "finance"
-    immobilier = "immobilier"
-    opportunite = "opportunite"
+    real_estate = "real_estate"
+    opportunity = "opportunity"
 
 
 class ActionTypeEnum(str, Enum):
-    individuelle = "individuelle"
-    commune = "commune"
+    individual = "individual"
+    shared = "shared"
 
 
 class ActionStatusEnum(str, Enum):
-    disponible = "disponible"
-    complet = "complet"
-    retire = "retire"
+    available = "available"
+    completed = "completed"
+    withdrawn = "withdrawn"
 
 
 # =========================
@@ -30,7 +30,10 @@ class ActionStatusEnum(str, Enum):
 class ActionBase(BaseModel):
     name: str
     category: ActionCategoryEnum
-    type: ActionTypeEnum = ActionTypeEnum.individuelle
+
+    # ✅ juste valeur changée
+    type: ActionTypeEnum = ActionTypeEnum.individual
+
     total_parts: int = 1
     price_usdt: float
     price_per_part: float
@@ -40,7 +43,10 @@ class ActionBase(BaseModel):
 
 class ActionSchema(ActionBase):
     id: int
-    status: ActionStatusEnum = ActionStatusEnum.disponible
+
+    # ✅ juste valeur changée
+    status: ActionStatusEnum = ActionStatusEnum.available
+
     created_at: datetime
 
     @computed_field

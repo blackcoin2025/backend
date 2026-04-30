@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.models import Bonus, BonusStatus, Wallet, Action, UserAction, ActionCategory
 
@@ -50,7 +50,7 @@ async def convert_daily_bonus(db: AsyncSession, user_id: int):
     bonus.points_restants -= int(bonus.points_restants * taux)
     bonus.valeur_equivalente = (bonus.valeur_equivalente or 0) + montant_converti
     bonus.status = BonusStatus.en_conversion
-    bonus.converti_le = datetime.utcnow()
+    bonus.converti_le = datetime.now(timezone.utc)
 
     # 4️⃣ Créditer le wallet de l'utilisateur
     wallet_query = select(Wallet).where(Wallet.user_id == user_id)

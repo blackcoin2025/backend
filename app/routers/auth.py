@@ -6,7 +6,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from datetime import datetime, timedelta, date
+from datetime import datetime, timezone, timedelta, date
 from pydantic import EmailStr
 from uuid import uuid4
 import os
@@ -89,7 +89,7 @@ async def register_user(
 
     hashed_pwd = pwd_context.hash(password)
     code = generate_code()
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     expiration = timedelta(minutes=5)
     promo_code_clean = promo_code.upper() if promo_code else None
 
@@ -169,7 +169,7 @@ async def verify_email(
         if pending.verification_code != data.code:
             raise HTTPException(status_code=400, detail="Code incorrect")
 
-        if datetime.utcnow() > pending.code_expires_at:
+        if datetime.now(timezone.utc) > pending.code_expires_at:
             raise HTTPException(status_code=400, detail="Code expiré")
 
         avatar_final = (

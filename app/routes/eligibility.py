@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, distinct
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.database import get_async_session
 from app.models import (
@@ -14,10 +14,20 @@ from app.models import (
 )
 from app.dependencies.auth import get_current_user
 
-# 🔥 cache
 from app.core.cache import cache_get, cache_set
 
 router = APIRouter(prefix="/eligibility", tags=["Airdrop"])
+
+
+# =========================
+# 🧠 UTILS
+# =========================
+def ensure_utc(dt):
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 @router.get("/check")
@@ -80,12 +90,15 @@ async def check_eligibility(
         )
     ).scalars().first()
 
-    points = balance.points if balance else 0
+    points = int(balance.points) if balance and balance.points else 0
 
     # =========================
-    # DAYS
+    # DAYS (FIX TIMEZONE 🔥)
     # =========================
-    days_active = (datetime.utcnow() - current_user.created_at).days
+    created_at = ensure_utc(current_user.created_at)
+    now = datetime.now(timezone.utc)
+
+    days_active = (now - created_at).days if created_at else 0
 
     # =========================
     # LEVEL
@@ -98,7 +111,7 @@ async def check_eligibility(
         )
     ).scalars().first()
 
-    level = stats.level if stats else 1
+    level = stats.level if stats and stats.level else 1
 
     # =========================
     # RESULT
@@ -114,20 +127,13 @@ async def check_eligibility(
         "details": {
             "friends_count": friends_count,
             "tasks_completed": tasks_completed,
-            "points": int(points),
+            "points": points,
             "days_active": days_active,
             "level": level,
         }
     }
 
-    result["eligible"] = all([
-        result["friends"],
-        result["pack"],
-        result["tasks"],
-        result["points"],
-        result["days"],
-        result["level"],
-    ])
+    result["eligible"] = all(result.values())
 
     # -------------------------
     # 🔥 CACHE SET

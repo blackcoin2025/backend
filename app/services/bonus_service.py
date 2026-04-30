@@ -4,7 +4,7 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.models import Bonus, BonusStatus, Wallet, Friend, UserAction, Action, ActionCategory
 
@@ -110,7 +110,7 @@ async def convert_daily_bonus(db: AsyncSession, user_id: int):
     bonus.points_restants = points_restants - montant_converti
     bonus.valeur_equivalente = (bonus.valeur_equivalente or Decimal("0")) + montant_converti
     bonus.status = BonusStatus.en_conversion
-    bonus.converti_le = datetime.utcnow()
+    bonus.converti_le = datetime.now(timezone.utc)
 
     # Mise à jour wallet
     wallet_query = select(Wallet).where(Wallet.user_id == user_id)
@@ -157,7 +157,7 @@ async def add_bonus_points(db: AsyncSession, user_id: int, amount: Decimal):
             points_restants=amount,
             valeur_equivalente=Decimal("0"),
             status=BonusStatus.en_attente,
-            cree_le=datetime.utcnow(),
+            cree_le=datetime.now(timezone.utc),
         )
         db.add(bonus)
     else:

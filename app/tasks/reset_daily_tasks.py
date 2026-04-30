@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timedelta, time
+from datetime import datetime, timezone, timedelta, time
 import pytz
 from sqlalchemy import delete, update
 

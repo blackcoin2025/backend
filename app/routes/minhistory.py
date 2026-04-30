@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.database import get_async_session
 from app.models import MiningHistory, Balance, UserMiningStats
@@ -61,7 +61,7 @@ async def add_mining_entry(payload: AddMiningPayload, session: AsyncSession = De
     if points <= 0:
         raise HTTPException(status_code=400, detail="Le montant doit être positif.")
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # -------------------------
     # 1️⃣ Ajouter dans MiningHistory

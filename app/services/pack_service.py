@@ -1,6 +1,6 @@
 # app/services/pack_service.py
 
-from datetime import datetime, timedelta, date
+from datetime import datetime, timezone, timedelta, date
 from typing import Optional
 from decimal import Decimal
 
@@ -117,13 +117,12 @@ async def start_pack(user_id: int, user_pack_id: int, db: AsyncSession):
 
     pack = await get_user_pack(db, user_id, user_pack_id)
 
-    if pack.pack_status not in (None, "payé", "en_cours"):
+    if pack.pack_status not in (None, "payé", "paid", "en_cours", "in_progress"):
         raise HTTPException(
             400,
             f"Impossible de démarrer depuis '{pack.pack_status}'"
         )
 
-    # récupérer les tâches du pack
     tasks = (
         await db.execute(
             select(DailyTask).where(DailyTask.pack_id == pack.pack_id)
@@ -133,7 +132,6 @@ async def start_pack(user_id: int, user_pack_id: int, db: AsyncSession):
     if not tasks:
         raise HTTPException(404, "Aucune tâche définie")
 
-    # récupérer tâches déjà créées
     existing_tasks = (
         await db.execute(
             select(UserDailyTask)
@@ -141,7 +139,6 @@ async def start_pack(user_id: int, user_pack_id: int, db: AsyncSession):
         )
     ).scalars().all()
 
-    # 🔐 protection anti doublons
     existing_task_ids = {t.task_id for t in existing_tasks}
 
     for t in tasks:
@@ -156,7 +153,7 @@ async def start_pack(user_id: int, user_pack_id: int, db: AsyncSession):
                 )
             )
 
-    pack.start_date = datetime.utcnow()
+    pack.start_date = datetime.now(timezone.utc)
     pack.current_day = date.today()
 
     await refresh_pack_state(pack, db)
@@ -164,6 +161,39 @@ async def start_pack(user_id: int, user_pack_id: int, db: AsyncSession):
     await db.commit()
 
     return pack
+
+
+# =========================================================
+# 📋 GET USER DAILY TASKS (FIX FRONTEND DATA)
+# =========================================================
+
+async def get_user_daily_tasks(user_id: int, user_pack_id: int, db: AsyncSession):
+
+    result = await db.execute(
+        select(UserDailyTask)
+        .options(selectinload(UserDailyTask.task))
+        .where(
+            UserDailyTask.user_id == user_id,
+            UserDailyTask.user_pack_id == user_pack_id
+        )
+    )
+
+    tasks = result.scalars().all()
+
+    if not tasks:
+        return []
+
+    return [
+        {
+            "id": t.id,
+            "description": t.task.description,
+            "platform": t.task.platform,
+            "video_url": t.task.video_url,
+            "completed": t.completed,
+            "started_at": t.started_at,  # ✅ CORRIGÉ (au lieu de completed_at)
+        }
+        for t in tasks
+    ]
 
 
 # =========================================================
@@ -184,7 +214,7 @@ async def complete_user_daily_task(user_id: int, task_id: int, db: AsyncSession)
     if not task:
         raise HTTPException(404, "Tâche introuvable")
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     if (
         task.completed
@@ -213,19 +243,33 @@ async def complete_user_daily_task(user_id: int, task_id: int, db: AsyncSession)
 
 
 # =========================================================
-# CLAIM REWARD
+# CLAIM REWARD (CORRIGÉ 🔥)
 # =========================================================
 
 async def claim_pack_reward(user_id: int, user_pack_id: int, db: AsyncSession):
 
-    pack = await get_user_pack(db, user_id, user_pack_id)
+    # 🔒 FIX 1 : LOCK DB (anti double claim)
+    result = await db.execute(
+        select(UserPack)
+        .options(selectinload(UserPack.user))
+        .where(
+            UserPack.id == user_pack_id,
+            UserPack.user_id == user_id
+        )
+        .with_for_update()
+    )
+
+    pack = result.scalars().first()
+
+    if not pack:
+        raise HTTPException(404, "Pack introuvable")
 
     await refresh_pack_state(pack, db)
 
     if not pack.is_unlocked:
         raise HTTPException(400, "Complète d'abord les tâches")
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     if pack.last_claim_date and (now - pack.last_claim_date) < timedelta(hours=24):
         raise HTTPException(400, "Réclamation trop tôt")
@@ -235,10 +279,16 @@ async def claim_pack_reward(user_id: int, user_pack_id: int, db: AsyncSession):
     if not user:
         raise HTTPException(404, "Utilisateur introuvable")
 
-    earnings = Decimal(str(pack.daily_earnings or "0"))
+    # 🔥 FIX 2 : BON CHAMP
+    earnings = Decimal(str(pack.daily_earnings_bkc or "0"))
 
-    # crédit wallet
-    await credit_wallet(user, earnings, db)
+    # 🔥 FIX 3 : BON APPEL SERVICE WALLET
+    await credit_wallet(
+        db=db,
+        user_id=user.id,
+        amount=earnings,
+        source="pack_claim"
+    )
 
     pack.total_earned = (pack.total_earned or Decimal("0")) + earnings
     pack.last_claim_date = now

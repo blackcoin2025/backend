@@ -7,66 +7,104 @@ from app.database import Base
 
 
 # -----------------------------
-# Enums pour les Actions
+# ENUMS (CLÉS TECHNIQUES)
 # -----------------------------
-class ActionType(enum.Enum):
-    individuelle = "individuelle"
-    commune = "commune"
+class ActionType(str, enum.Enum):
+    individual = "individual"
+    shared = "shared"
 
 
-class ActionStatus(enum.Enum):
-    disponible = "disponible"
-    complet = "complet"
-    retire = "retire"
+class ActionStatus(str, enum.Enum):
+    available = "available"
+    completed = "completed"
+    withdrawn = "withdrawn"
 
 
-class ActionCategory(enum.Enum):
+class ActionCategory(str, enum.Enum):
     finance = "finance"
-    immobilier = "immobilier"
-    opportunite = "opportunite"
+    real_estate = "real_estate"
+    opportunity = "opportunity"
 
 
 # -----------------------------
-# Actions (packs)
+# ACTIONS (PACKS)
 # -----------------------------
 class Action(Base):
     __tablename__ = "actions"
 
     id = Column(Integer, primary_key=True, index=True)
+
+    # 🔥 clé i18n (ex: "discovery")
     name = Column(String(150), nullable=False)
+
     category = Column(SqlEnum(ActionCategory), nullable=False)
-    type = Column(SqlEnum(ActionType), default=ActionType.individuelle)
+
+    type = Column(
+        SqlEnum(ActionType),
+        default=ActionType.individual,
+        nullable=False
+    )
+
     total_parts = Column(Integer, default=1)
+
     price_per_part = Column(Float, nullable=False)
+    price_usdt = Column(Float, nullable=False)
+
     value_bkc = Column(Float, nullable=True)
     image_url = Column(String(255), nullable=True)
-    status = Column(SqlEnum(ActionStatus), default=ActionStatus.disponible)
-    price_usdt = Column(Float, nullable=False)
+
+    status = Column(
+        SqlEnum(ActionStatus),
+        default=ActionStatus.available,
+        nullable=False
+    )
+
     created_at = Column(DateTime, server_default=func.now())
 
-    user_packs = relationship("UserPack", back_populates="pack", cascade="all, delete-orphan")
-    daily_tasks = relationship("DailyTask", back_populates="pack", cascade="all, delete-orphan")
-    buyers = relationship("UserAction", back_populates="action", cascade="all, delete-orphan")
+    # relations
+    user_packs = relationship(
+        "UserPack",
+        back_populates="pack",
+        cascade="all, delete-orphan"
+    )
+
+    daily_tasks = relationship(
+        "DailyTask",
+        back_populates="pack",
+        cascade="all, delete-orphan"
+    )
+
+    buyers = relationship(
+        "UserAction",
+        back_populates="action",
+        cascade="all, delete-orphan"
+    )
 
 
+# -----------------------------
+# USER PACK
+# -----------------------------
 class UserPack(Base):
     __tablename__ = "user_packs"
 
     id = Column(Integer, primary_key=True)
+
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     pack_id = Column(Integer, ForeignKey("actions.id"), nullable=False)
 
-    start_date = Column(DateTime, default=func.now())
-    last_claim_date = Column(DateTime, nullable=True)
+    # ✅ FIX CRITIQUE
+    start_date = Column(DateTime(timezone=True), default=func.now())
+    last_claim_date = Column(DateTime(timezone=True), nullable=True)
 
     daily_earnings = Column(Float, default=0)
-    is_unlocked = Column(Boolean, default=False)
     total_earned = Column(Float, default=0)
+
+    is_unlocked = Column(Boolean, default=False)
 
     current_day = Column(Date, default=func.current_date())
     all_tasks_completed = Column(Boolean, default=False)
 
-    pack_status = Column(String(50), default="payé")
+    pack_status = Column(String(50), default="paid")
 
     user = relationship("User", back_populates="packs")
     pack = relationship("Action", back_populates="user_packs")
@@ -77,7 +115,9 @@ class UserPack(Base):
         cascade="all, delete-orphan"
     )
 
-
+# -----------------------------
+# USER ACTION (ACHAT)
+# -----------------------------
 class UserAction(Base):
     __tablename__ = "user_actions"
 
@@ -104,6 +144,9 @@ class UserAction(Base):
     user = relationship("User", back_populates="user_actions")
 
 
+# -----------------------------
+# DAILY TASK
+# -----------------------------
 class DailyTask(Base):
     __tablename__ = "daily_tasks"
 
@@ -111,8 +154,10 @@ class DailyTask(Base):
 
     pack_id = Column(Integer, ForeignKey("actions.id"), nullable=False)
 
-    platform = Column(String(50))
-    description = Column(String(255))
+    # 🔥 clés i18n
+    platform = Column(String(50))      # ex: "telegram"
+    description = Column(String(255))  # ex: "join_telegram"
+
     video_url = Column(String(255))
 
     reward_share = Column(Float)
@@ -126,6 +171,10 @@ class DailyTask(Base):
     )
 
 
+# -----------------------------
+# USER DAILY TASK
+# -----------------------------
+
 class UserDailyTask(Base):
     __tablename__ = "user_daily_tasks"
 
@@ -136,10 +185,10 @@ class UserDailyTask(Base):
 
     user_pack_id = Column(Integer, ForeignKey("user_packs.id"), nullable=True)
 
-    started_at = Column(DateTime, nullable=True)
+    # ✅ FIX ICI
+    started_at = Column(DateTime(timezone=True), nullable=True)
     completed = Column(Boolean, default=False)
-    completed_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
 
     task = relationship("DailyTask", back_populates="user_tasks")
-
     user_pack = relationship("UserPack", back_populates="tasks")

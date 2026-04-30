@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 from app.database import get_async_session
 from app.models import MiningHistory, MineTimer, UserMiningStats
@@ -62,7 +62,7 @@ async def start_mining(
 ):
     await require_redis()  # 🔒 HARD BLOCK
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     result_timer = await session.execute(
         select(MineTimer).where(
@@ -118,7 +118,7 @@ async def mining_status(
     if cached:
         return cached
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     result_timer = await session.execute(
         select(MineTimer).where(
@@ -187,7 +187,7 @@ async def claim_mining(
         )
 
     try:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         result_timer = await session.execute(
             select(MineTimer)

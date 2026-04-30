@@ -3,11 +3,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from typing import List, Dict
 from decimal import Decimal
-from app.core.cache import cache_get, cache_set, cache_delete
 
+from app.core.cache import cache_get, cache_set, cache_delete
 from app.database import get_async_session
 from app.models import (
     Bonus,
@@ -28,12 +28,22 @@ CLAIM_AMOUNT = Decimal("0.3")
 COOLDOWN_HOURS = 24
 
 
+# =========================
+# 🔒 SAFE DATETIME
+# =========================
+def ensure_utc(dt):
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 # ============================================================
 # 🔹 VERIFICATION CONDITIONS
 # ============================================================
 async def check_bonus_conditions(user_id: int, db: AsyncSession):
 
-    # 1️⃣ PACK
     has_pack = (
         await db.execute(
             select(UserPack).where(UserPack.user_id == user_id)
@@ -52,7 +62,6 @@ async def check_bonus_conditions(user_id: int, db: AsyncSession):
             )
         ).scalars().first() is not None
 
-    # 2️⃣ DEPOT
     real_cash = (
         await db.execute(
             select(RealCash).where(RealCash.user_id == user_id)
@@ -61,7 +70,6 @@ async def check_bonus_conditions(user_id: int, db: AsyncSession):
 
     has_deposit = bool(real_cash and real_cash.cash_balance > 0)
 
-    # 3️⃣ FRIENDS
     friends_count = (
         await db.execute(
             select(func.count())
@@ -94,19 +102,17 @@ async def get_user_bonus(user_id: int, db: AsyncSession = Depends(get_async_sess
 
 
 # ============================================================
-# 🔹 STATUS BONUS (FRONTEND)
+# 🔹 STATUS BONUS
 # ============================================================
 @router.get("/{user_id}/status", response_model=Dict)
 async def get_bonus_status(user_id: int, db: AsyncSession = Depends(get_async_session)):
 
     cache_key = f"bonus_status:{user_id}"
 
-    # 🔥 1. CACHE
     cached = await cache_get(cache_key)
     if cached:
         return cached
 
-    # 🔥 2. DB
     bonus = (
         await db.execute(
             select(Bonus)
@@ -133,9 +139,12 @@ async def get_bonus_status(user_id: int, db: AsyncSession = Depends(get_async_se
             if not bonus.last_claim_at:
                 status = "eligible"
             else:
-                next_allowed = bonus.last_claim_at + timedelta(hours=COOLDOWN_HOURS)
+                last_claim = ensure_utc(bonus.last_claim_at)
+                next_allowed = last_claim + timedelta(hours=COOLDOWN_HOURS)
 
-                if datetime.utcnow() >= next_allowed:
+                now = datetime.now(timezone.utc)
+
+                if now >= next_allowed:
                     status = "eligible"
                 else:
                     status = "cooldown"
@@ -145,20 +154,19 @@ async def get_bonus_status(user_id: int, db: AsyncSession = Depends(get_async_se
         "status": status,
         "total_points": float(bonus.total_points),
         "points_restants": float(bonus.points_restants),
-        "last_claim_at": bonus.last_claim_at,
+        "last_claim_at": ensure_utc(bonus.last_claim_at),
         "next_claim_at": next_claim_at,
         "conditions": conditions,
         "claim_amount": float(CLAIM_AMOUNT),
     }
 
-    # 🔥 3. CACHE (TTL court car dynamique)
     await cache_set(cache_key, data, ttl=15)
 
     return data
 
 
 # ============================================================
-# 🔹 CLAIM BONUS (PRODUCTION SAFE)
+# 🔹 CLAIM BONUS
 # ============================================================
 @router.post("/{user_id}/claim")
 async def claim_bonus(user_id: int, db: AsyncSession = Depends(get_async_session)):
@@ -183,14 +191,14 @@ async def claim_bonus(user_id: int, db: AsyncSession = Depends(get_async_session
     if bonus.points_restants < CLAIM_AMOUNT:
         raise HTTPException(status_code=400, detail="Points bonus insuffisants")
 
-    # 🔹 COOLDOWN
+    # 🔒 COOLDOWN sécurisé
     if bonus.last_claim_at:
-        next_allowed = bonus.last_claim_at + timedelta(hours=COOLDOWN_HOURS)
-        if datetime.utcnow() < next_allowed:
+        last_claim = ensure_utc(bonus.last_claim_at)
+        next_allowed = last_claim + timedelta(hours=COOLDOWN_HOURS)
+
+        if datetime.now(timezone.utc) < next_allowed:
             raise HTTPException(status_code=400, detail="Cooldown actif")
 
-    # 🔹 CREDIT WALLET VIA SERVICE
-    # On récupère l'utilisateur pour le service
     user = (
         await db.execute(
             select(User).where(User.id == user_id)
@@ -200,15 +208,17 @@ async def claim_bonus(user_id: int, db: AsyncSession = Depends(get_async_session
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur introuvable")
 
-    await credit_wallet(user, Decimal(str(CLAIM_AMOUNT)), db)
+    await credit_wallet(user, CLAIM_AMOUNT, db)
 
-    # 🔹 UPDATE BONUS
+    # 🔒 update propre
+    now = datetime.now(timezone.utc)
+
     bonus.points_restants -= CLAIM_AMOUNT
-    bonus.last_claim_at = datetime.utcnow()
+    bonus.last_claim_at = now
 
     if bonus.points_restants <= Decimal("0"):
         bonus.status = "converti"
-        bonus.converti_le = datetime.utcnow()
+        bonus.converti_le = now
 
     await db.commit()
 
@@ -218,5 +228,5 @@ async def claim_bonus(user_id: int, db: AsyncSession = Depends(get_async_session
         "message": "Bonus réclamé avec succès",
         "amount": float(CLAIM_AMOUNT),
         "points_restants": float(bonus.points_restants),
-        "next_claim_at": bonus.last_claim_at + timedelta(hours=COOLDOWN_HOURS),
+        "next_claim_at": now + timedelta(hours=COOLDOWN_HOURS),
     }

@@ -1,4 +1,4 @@
-from sqlalchemy import Column,Integer,String,DateTime,ForeignKey,Numeric
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Numeric
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import Enum as SqlEnum
 from sqlalchemy.sql import func
@@ -29,9 +29,10 @@ class Bonus(Base):
     status = Column(SqlEnum(BonusStatus), default=BonusStatus.en_attente, nullable=False)
     raison = Column(String(100), default="bonus_inscription", nullable=False)
 
-    cree_le = Column(DateTime, server_default=func.now())
-    converti_le = Column(DateTime, nullable=True)
-    last_claim_at = Column(DateTime, nullable=True)
+    # ✅ CORRECTIONS ICI
+    cree_le = Column(DateTime(timezone=True), server_default=func.now())
+    converti_le = Column(DateTime(timezone=True), nullable=True)
+    last_claim_at = Column(DateTime(timezone=True), nullable=True)
 
     user = relationship("User", backref="bonus")
 
@@ -41,8 +42,11 @@ class RealCash(Base):
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True)
-    cash_balance = Column(Numeric(12,2), default=0.00, nullable=False)
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    cash_balance = Column(Numeric(12, 2), default=0.00, nullable=False)
+
+    # ✅ recommandé aussi
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     user = relationship("User", backref="real_cash")

@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import List
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from app.database import get_async_session
@@ -65,11 +65,11 @@ async def start_task(
         user_task = UserTask(
             user_id=user_id,
             task_id=task_id,
-            started_at=datetime.utcnow()
+            started_at=datetime.now(timezone.utc)
         )
         db.add(user_task)
     else:
-        user_task.started_at = datetime.utcnow()
+        user_task.started_at = datetime.now(timezone.utc)
 
     await db.commit()
     await db.refresh(user_task)
@@ -118,7 +118,7 @@ async def validate_task(
     if user_task.completed:
         raise HTTPException(400, "Tâche déjà complétée")
 
-    elapsed = (datetime.utcnow() - user_task.started_at).total_seconds()
+    elapsed = (datetime.now(timezone.utc) - user_task.started_at).total_seconds()
 
     if elapsed < TASK_MIN_DURATION:
         raise HTTPException(
@@ -128,7 +128,7 @@ async def validate_task(
 
     # 🔥 VALIDATION
     user_task.completed = True
-    user_task.completed_at = datetime.utcnow()
+    user_task.completed_at = datetime.now(timezone.utc)
 
     total_points = Decimal(task.reward_points)
 
@@ -232,7 +232,7 @@ async def get_my_pending_tasks(
             started_at = user_task.started_at
 
             if user_task.started_at and not user_task.completed:
-                elapsed = (datetime.utcnow() - user_task.started_at).total_seconds()
+                elapsed = (datetime.now(timezone.utc) - user_task.started_at).total_seconds()
                 time_left = max(0, TASK_MIN_DURATION - int(elapsed))
 
         if not completed:

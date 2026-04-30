@@ -22,6 +22,8 @@ from app.routes import (
 )
 from app.routers import auth, auth_login, friends, luckygame
 from app.utils import cookies
+from app.routes import myassets
+from app.routes import dailytasks
 
 
 # -----------------------
@@ -95,6 +97,8 @@ app.include_router(minhistory.router, prefix="/minhistory", tags=["Historique Mi
 app.include_router(tasks.router, prefix="/tasks", tags=["Tâches"])
 app.include_router(actions.router)
 app.include_router(eligibility.router)
+app.include_router(myassets.router)
+app.include_router(dailytasks.router)
 
 
 # -----------------------

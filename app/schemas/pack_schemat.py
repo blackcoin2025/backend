@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from .action_schemat import ActionCategoryEnum, ActionTypeEnum, ActionStatusEnum  # import relatif corrigé
 
