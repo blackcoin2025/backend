@@ -26,6 +26,11 @@ class ActionCategory(str, enum.Enum):
     opportunity = "opportunity"
 
 
+class PackStatus(str, enum.Enum):
+    paid = "paid"
+    in_progress = "in_progress"
+    on_hold = "on_hold"
+
 # -----------------------------
 # ACTIONS (PACKS)
 # -----------------------------
@@ -92,20 +97,29 @@ class UserPack(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     pack_id = Column(Integer, ForeignKey("actions.id"), nullable=False)
 
-    # ✅ FIX CRITIQUE
+    # 📅 Dates
     start_date = Column(DateTime(timezone=True), default=func.now())
     last_claim_date = Column(DateTime(timezone=True), nullable=True)
 
+    # 💰 Gains
     daily_earnings = Column(Float, default=0)
     total_earned = Column(Float, default=0)
 
+    # 🔓 état interne
     is_unlocked = Column(Boolean, default=False)
 
+    # 📆 gestion journalière
     current_day = Column(Date, default=func.current_date())
     all_tasks_completed = Column(Boolean, default=False)
 
-    pack_status = Column(String(50), default="paid")
+    # 🔥 STATUS PROPRE (ENUM)
+    pack_status = Column(
+        SqlEnum(PackStatus),
+        default=PackStatus.paid,
+        nullable=False
+    )
 
+    # relations
     user = relationship("User", back_populates="packs")
     pack = relationship("Action", back_populates="user_packs")
 

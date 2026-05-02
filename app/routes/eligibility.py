@@ -20,6 +20,13 @@ router = APIRouter(prefix="/eligibility", tags=["Airdrop"])
 
 
 # =========================
+# 🧠 CONSTANTES MÉTIER
+# =========================
+ACTIVE_PACK_STATUSES = ["paid", "in_progress", "on_hold"]
+CRITERIA_KEYS = ["friends", "pack", "tasks", "points", "days", "level"]
+
+
+# =========================
 # 🧠 UTILS
 # =========================
 def ensure_utc(dt):
@@ -58,13 +65,13 @@ async def check_eligibility(
     ).scalar() or 0
 
     # =========================
-    # PACK
+    # PACK (FIX LOGIQUE)
     # =========================
     has_pack = (
         await db.execute(
             select(UserPack.id).where(
                 UserPack.user_id == user_id,
-                UserPack.pack_status == "payé",
+                UserPack.pack_status.in_(ACTIVE_PACK_STATUSES),
             )
         )
     ).first() is not None
@@ -93,7 +100,7 @@ async def check_eligibility(
     points = int(balance.points) if balance and balance.points else 0
 
     # =========================
-    # DAYS (FIX TIMEZONE 🔥)
+    # DAYS
     # =========================
     created_at = ensure_utc(current_user.created_at)
     now = datetime.now(timezone.utc)
@@ -133,7 +140,8 @@ async def check_eligibility(
         }
     }
 
-    result["eligible"] = all(result.values())
+    # ✅ FIX BUG all()
+    result["eligible"] = all(result[key] for key in CRITERIA_KEYS)
 
     # -------------------------
     # 🔥 CACHE SET

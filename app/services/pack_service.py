@@ -3,6 +3,7 @@
 from datetime import datetime, timezone, timedelta, date
 from typing import Optional
 from decimal import Decimal
+from app.models import PackStatus
 
 from fastapi import HTTPException
 from sqlalchemy import select, func
@@ -22,20 +23,24 @@ def compute_pack_state(
     total_tasks: int,
     completed_today: int,
     last_claim_date: Optional[datetime],
-) -> tuple[str, bool, bool]:
+) -> tuple[PackStatus, bool, bool]:
 
     today = date.today()
 
+    # aucun task → déjà actif
     if total_tasks == 0:
-        return "payé", False, False
+        return PackStatus.in_progress, False, False
 
+    # tâches pas finies
     if completed_today < total_tasks:
-        return "en_cours", False, False
+        return PackStatus.in_progress, False, False
 
+    # déjà claim aujourd’hui
     if last_claim_date and last_claim_date.date() == today:
-        return "en_attente", False, False
+        return PackStatus.on_hold, False, False
 
-    return "à_reclamer", True, True
+    # prêt à claim (mais status ne change pas)
+    return PackStatus.in_progress, True, True
 
 
 # =========================================================
@@ -117,7 +122,11 @@ async def start_pack(user_id: int, user_pack_id: int, db: AsyncSession):
 
     pack = await get_user_pack(db, user_id, user_pack_id)
 
-    if pack.pack_status not in (None, "payé", "paid", "en_cours", "in_progress"):
+    if pack.pack_status not in (
+    None,
+    PackStatus.paid,
+    PackStatus.in_progress,
+):
         raise HTTPException(
             400,
             f"Impossible de démarrer depuis '{pack.pack_status}'"
@@ -280,15 +289,10 @@ async def claim_pack_reward(user_id: int, user_pack_id: int, db: AsyncSession):
         raise HTTPException(404, "Utilisateur introuvable")
 
     # 🔥 FIX 2 : BON CHAMP
-    earnings = Decimal(str(pack.daily_earnings_bkc or "0"))
+    earnings = Decimal(str(pack.daily_earnings or 0))
 
     # 🔥 FIX 3 : BON APPEL SERVICE WALLET
-    await credit_wallet(
-        db=db,
-        user_id=user.id,
-        amount=earnings,
-        source="pack_claim"
-    )
+    await credit_wallet(user, earnings, db)
 
     pack.total_earned = (pack.total_earned or Decimal("0")) + earnings
     pack.last_claim_date = now
@@ -303,11 +307,11 @@ async def claim_pack_reward(user_id: int, user_pack_id: int, db: AsyncSession):
         )
     ).scalars().first()
 
-    wallet_balance = float(wallet.amount) if wallet and wallet.amount else 0.0
+    wallet_balance = str(wallet.amount) if wallet and wallet.amount else "0"
 
     return {
         "message": "Réclamation effectuée ✅",
-        "claimed_amount": float(earnings),
+        "claimed_amount": str(earnings),
         "wallet_balance": wallet_balance,
         "next_claim_available": (now + timedelta(hours=24)).isoformat(),
     }
