@@ -1,9 +1,13 @@
+# app/routes/balance.py
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, Field
+import logging
 
 from app.database import get_async_session
 from app.services.balance_service import credit_balance, get_user_balance
-from app.routers.auth import get_current_user
+from app.dependencies.dependency import require_completed_welcome
 from app.models import User
 
 # 🔥 cache
@@ -14,57 +18,73 @@ router = APIRouter(
     tags=["Balance"]
 )
 
+logger = logging.getLogger(__name__)
 
-# -----------------------------
-# ADD BALANCE (NO CACHE + INVALIDATE)
-# -----------------------------
+
+# ============================================================
+# 🔹 SCHEMA
+# ============================================================
+class AddBalanceRequest(BaseModel):
+    points: int = Field(..., gt=0)
+
+
+# ============================================================
+# 🔹 ADD BALANCE (PROTÉGÉ + CACHE INVALIDATION)
+# ============================================================
 @router.post("/add")
 async def add_balance_points(
-    points: int,
-    current_user: User = Depends(get_current_user),
+    payload: AddBalanceRequest,
+    current_user: User = Depends(require_completed_welcome),
     db: AsyncSession = Depends(get_async_session)
 ):
-    if points <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Points invalides"
-        )
-
     try:
-        new_total = await credit_balance(db, current_user.id, points)
+        # 🔥 crédit
+        new_total = await credit_balance(
+            db=db,
+            user_id=current_user.id,
+            points=payload.points
+        )
 
         # 🔥 invalider cache
-        await cache_delete(f"balance:{current_user.id}")
+        cache_key = f"balance:{current_user.id}"
+        await cache_delete(cache_key)
+
+        return {
+            "success": True,
+            "message": "Points ajoutés",
+            "balance": new_total
+        }
 
     except Exception as e:
+        logger.error(f"[BALANCE ERROR] {e}", exc_info=True)
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Erreur lors de l'ajout de balance"
         )
 
-    return {
-        "message": "Points ajoutés à la balance",
-        "points": new_total
-    }
 
-
-# -----------------------------
-# GET BALANCE (CACHE)
-# -----------------------------
+# ============================================================
+# 🔹 GET BALANCE (CACHE + PROTÉGÉ)
+# ============================================================
 @router.get("/")
 async def get_balance(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_completed_welcome),
     db: AsyncSession = Depends(get_async_session)
 ):
     user_id = current_user.id
     cache_key = f"balance:{user_id}"
 
-    # 🔥 1. try cache
+    # 🔥 1. CACHE
     cached = await cache_get(cache_key)
     if cached:
-        return cached
+        return {
+            "success": True,
+            "source": "cache",
+            **cached
+        }
 
-    # 🔥 2. fallback DB
+    # 🔥 2. DB
     points = await get_user_balance(db, user_id)
 
     data = {
@@ -72,7 +92,11 @@ async def get_balance(
         "points": points
     }
 
-    # 🔥 3. set cache (TTL court = cohérence)
+    # 🔥 3. SET CACHE
     await cache_set(cache_key, data, ttl=30)
 
-    return data
+    return {
+        "success": True,
+        "source": "database",
+        **data
+    }

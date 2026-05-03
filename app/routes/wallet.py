@@ -1,9 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
+# app/routes/wallet.py
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, Field
+from decimal import Decimal
+import logging
 
 from app.database import get_async_session
-from app.services.wallet_service import credit_wallet, debit_wallet, get_wallet_balance
-from app.routers.auth import get_current_user
+from app.services.wallet_service import (
+    credit_wallet,
+    debit_wallet,
+    get_wallet_balance
+)
+from app.dependencies.dependency import require_completed_welcome
+from app.models import User
 
 # 🔥 cache
 from app.core.cache import cache_get, cache_set, cache_delete
@@ -13,82 +23,139 @@ router = APIRouter(
     tags=["Wallet"]
 )
 
+logger = logging.getLogger(__name__)
 
-# -----------------------------
-# CREDIT (NO CACHE + INVALIDATE)
-# -----------------------------
+
+# ============================================================
+# 🔹 SCHEMA
+# ============================================================
+class WalletOperationRequest(BaseModel):
+    amount: Decimal = Field(..., gt=0)
+
+
+# ============================================================
+# 🔹 CREDIT WALLET (PROTÉGÉ)
+# ============================================================
 @router.post("/credit")
 async def credit_user_wallet(
-    amount: float = Body(..., embed=True, ge=0.01),
-    user=Depends(get_current_user),
+    payload: WalletOperationRequest,
+    current_user: User = Depends(require_completed_welcome),
     db: AsyncSession = Depends(get_async_session)
 ):
     try:
-        wallet = await credit_wallet(user, amount, db)
+        # ⚠️ PROTECTION : empêcher appel externe abusif
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Opération interdite"
+        )
 
-        # 🔥 invalider cache
-        await cache_delete(f"wallet:{user.id}")
+        # 👉 à utiliser uniquement en interne (services)
+        wallet = await credit_wallet(
+            user=current_user,
+            amount=payload.amount,
+            db=db
+        )
+
+        await cache_delete(f"wallet:{current_user.id}")
 
         return {
-            "message": f"✅ {amount:.2f} $BKC ajoutés au wallet.",
-            "user_id": user.id,
-            "balance": wallet.amount
+            "success": True,
+            "balance": float(wallet.amount)
         }
 
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        logger.error(f"[WALLET CREDIT ERROR] {e}", exc_info=True)
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erreur lors du crédit"
+        )
 
 
-# -----------------------------
-# DEBIT (NO CACHE + INVALIDATE)
-# -----------------------------
+# ============================================================
+# 🔹 DEBIT WALLET (PROTÉGÉ)
+# ============================================================
 @router.post("/debit")
 async def debit_user_wallet(
-    amount: float = Body(..., embed=True, ge=0.01),
-    user=Depends(get_current_user),
+    payload: WalletOperationRequest,
+    current_user: User = Depends(require_completed_welcome),
     db: AsyncSession = Depends(get_async_session)
 ):
     try:
-        wallet = await debit_wallet(user, amount, db)
+        wallet = await debit_wallet(
+            user=current_user,
+            amount=payload.amount,
+            db=db
+        )
 
-        # 🔥 invalider cache
-        await cache_delete(f"wallet:{user.id}")
+        await cache_delete(f"wallet:{current_user.id}")
 
         return {
-            "message": f"💸 {amount:.2f} $BKC retirés du wallet.",
-            "user_id": user.id,
-            "balance": wallet.amount
+            "success": True,
+            "message": f"{payload.amount} retiré",
+            "balance": float(wallet.amount)
         }
 
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+    except Exception as e:
+        logger.error(f"[WALLET DEBIT ERROR] {e}", exc_info=True)
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erreur lors du débit"
+        )
 
 
-# -----------------------------
-# GET WALLET (CACHE)
-# -----------------------------
+# ============================================================
+# 🔹 GET WALLET (CACHE + PROTÉGÉ)
+# ============================================================
 @router.get("/")
 async def wallet_info(
-    user=Depends(get_current_user),
+    current_user: User = Depends(require_completed_welcome),
     db: AsyncSession = Depends(get_async_session)
 ):
-    user_id = user.id
+    user_id = current_user.id
     cache_key = f"wallet:{user_id}"
 
-    # 🔥 1. CACHE
-    cached = await cache_get(cache_key)
-    if cached:
-        return cached
+    try:
+        # 🔥 1. CACHE
+        cached = await cache_get(cache_key)
+        if cached:
+            return {
+                "success": True,
+                "source": "cache",
+                **cached
+            }
 
-    # 🔥 2. DB
-    balance = await get_wallet_balance(user, db)
+        # 🔥 2. DB
+        balance = await get_wallet_balance(current_user, db)
 
-    data = {
-        "user_id": user_id,
-        "balance": balance
-    }
+        data = {
+            "user_id": user_id,
+            "balance": float(balance)
+        }
 
-    # 🔥 3. SET CACHE
-    await cache_set(cache_key, data, ttl=30)
+        # 🔥 3. SET CACHE
+        await cache_set(cache_key, data, ttl=30)
 
-    return data
+        return {
+            "success": True,
+            "source": "database",
+            **data
+        }
+
+    except Exception as e:
+        logger.error(f"[WALLET FETCH ERROR] {e}", exc_info=True)
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erreur lors de la récupération du wallet"
+        )

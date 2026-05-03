@@ -13,37 +13,50 @@ from app.utils.cookies import set_access_token_cookie, set_refresh_token_cookie
 router = APIRouter()
 
 
+# ============================================================
+# 🔹 USER PAYLOAD
+# ============================================================
+def public_user_payload(user: User):
+    return {
+        "id": int(user.id),
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "email": user.email,
+        "username": user.username,
+        "phone": user.phone,
+        "is_verified": bool(user.is_verified),
+        "has_completed_welcome_tasks": bool(user.has_completed_welcome_tasks),
+        "requires_onboarding": not user.has_completed_welcome_tasks,  # 🔥 IMPORTANT
+        "balance": getattr(user, "balance", 0),
+        "level": getattr(user, "level", 1),
+        "wallet_address": getattr(user, "wallet_address", None),
+    }
+
+
+# ============================================================
+# 🔹 LOGIN
+# ============================================================
 @router.post("/login")
 async def login_user(
     payload: LoginRequest,
     db: AsyncSession = Depends(get_async_session),
 ):
-    """
-    Authentifie un utilisateur par email OU username + mot de passe.
-    Stocke les JWT (access + refresh) dans des cookies HttpOnly sécurisés.
-    Retourne uniquement les infos utilisateur (pas les tokens).
-    """
-
-    # ── 1) Validation des champs d'entrée
+    # ── 1) Validation
     email = (payload.email or "").strip() or None
     username = (payload.username or "").strip() or None
     password = payload.password
 
     if not password:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Le mot de passe est requis."
-        )
+        raise HTTPException(400, "Mot de passe requis")
 
     if not email and not username:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Fournissez au moins l'email ou le nom d'utilisateur."
-        )
+        raise HTTPException(400, "Email ou username requis")
 
-    # ── 2) Récupération de l'utilisateur
+    # ── 2) Recherche user
     if email and username:
-        query = select(User).where(or_(User.email == email, User.username == username))
+        query = select(User).where(
+            or_(User.email == email, User.username == username)
+        )
     elif email:
         query = select(User).where(User.email == email)
     else:
@@ -53,49 +66,32 @@ async def login_user(
     user = result.scalars().first()
 
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Identifiants invalides."
-        )
+        raise HTTPException(401, "Identifiants invalides")
 
-    # Vérifie cohérence email + username si les deux sont fournis
     if email and username and (user.email != email or user.username != username):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Identifiants invalides."
-        )
+        raise HTTPException(401, "Identifiants invalides")
 
-    # ── 3) Vérification du mot de passe
-    print("password bytes =", len(password.encode("utf-8")))
+    # ── 3) Password
     if not pwd_context.verify(password, user.password_hash):
+        raise HTTPException(401, "Identifiants invalides")
+
+    # ── 4) Vérification email
+    if not user.is_verified:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Identifiants invalides."
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Veuillez vérifier votre email."
         )
 
-    # ── 4) Création des tokens JWT
-    access_token = create_access_token(data={"sub": user.email})
-    refresh_token = create_refresh_token(data={"sub": user.email})
+    # ── 5) Tokens
+    access_token = create_access_token({"sub": user.email})
+    refresh_token = create_refresh_token({"sub": user.email})
 
-    # ── 5) Préparer la réponse
-    user_data = {
-        "id": int(user.id),
-        "first_name": user.first_name,
-        "last_name": user.last_name,
-        "email": user.email,
-        "username": user.username,
-        "phone": user.phone,
-        #"avatar_url": user.avatar_url,
-        "is_verified": bool(user.is_verified),
-        "has_completed_welcome_tasks": bool(user.has_completed_welcome_tasks),
-    }
-
-    response = JSONResponse(content={
-        "user": user_data,
-        "message": "Connexion réussie."
+    # ── 6) Réponse enrichie
+    response = JSONResponse({
+        "status": "success",
+        "user": public_user_payload(user)
     })
 
-    # ── 6) Ajout des cookies sécurisés
     set_access_token_cookie(response, access_token)
     set_refresh_token_cookie(response, refresh_token)
 
