@@ -19,7 +19,7 @@ class UserPackSchema(BaseModel):
     type: Optional[ActionTypeEnum] = None
     total_parts: Optional[int] = None
     price_per_part: Optional[float] = None
-    value_bkc: Optional[float] = None
+    value_LTN: Optional[float] = None
     image_url: Optional[str] = None
     status: Optional[ActionStatusEnum] = None
 

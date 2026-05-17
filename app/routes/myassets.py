@@ -48,13 +48,13 @@ async def get_my_assets(
             "total_invested_usdt": float(action.price_usdt),
 
             # 💸 GAINS
-            "total_earned_bkc": float(user_pack.total_earned or 0),
+            "total_earned_LTN": float(user_pack.total_earned or 0),
 
             # 📊 PROFIT
-            "profit_bkc": float(user_pack.total_earned or 0),
+            "profit_LTN": float(user_pack.total_earned or 0),
 
             # 📈 INFOS
-            "daily_earnings_bkc": float(user_pack.daily_earnings or 0),
+            "daily_earnings_LTN": float(user_pack.daily_earnings or 0),
 
             "status": user_pack.pack_status
         })

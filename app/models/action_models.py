@@ -55,7 +55,7 @@ class Action(Base):
     price_per_part = Column(Float, nullable=False)
     price_usdt = Column(Float, nullable=False)
 
-    value_bkc = Column(Float, nullable=True)
+    value_LTN = Column(Float, nullable=True)
     image_url = Column(String(255), nullable=True)
 
     status = Column(

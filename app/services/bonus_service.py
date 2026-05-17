@@ -128,7 +128,7 @@ async def convert_daily_bonus(db: AsyncSession, user_id: int):
 
     return {
         "success": True,
-        "message": f"{montant_converti:.2f} BKC convertis à {taux*100:.0f}%.",
+        "message": f"{montant_converti:.2f} LTN convertis à {taux*100:.0f}%.",
         "converted": montant_converti,
         "taux": taux,
         "remaining_points": bonus.points_restants,

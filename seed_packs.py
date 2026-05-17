@@ -6,10 +6,10 @@ from sqlalchemy.future import select
 from app.database import AsyncSessionLocal
 from app.models import Action, ActionCategory, DailyTask
 
-BKC_TO_USDT = 2  # 1 BKC = 2 USDT
+LTN_TO_USDT = 2  # 1 LTN = 2 USDT
 
 # =========================
-# 📦 PACKS (CLÉS UNIQUEMENT)
+# 📦 PACKS
 # =========================
 PACKS = [
     {"key": "discovery", "price": 4.44, "gain_percent": 1.2, "image": "/images/packs/pack1.png"},
@@ -25,14 +25,39 @@ PACKS = [
 ]
 
 # =========================
-# 📋 TASKS (CLÉS UNIQUEMENT)
+# 📋 TASKS
 # =========================
 TASK_LINKS = [
-    {"platform": "telegram", "key": "join_telegram", "video_url": "https://t.me/+2VYCu2Ygs0Q1YTk0"},
-    {"platform": "facebook", "key": "like_facebook", "video_url": "https://www.facebook.com/share/1CjsWSj1P3/"},
-    {"platform": "twitter", "key": "follow_twitter", "video_url": "https://x.com/BlackcoinON"},
-    {"platform": "youtube", "key": "subscribe_youtube", "video_url": "https://www.youtube.com/@Blackcoinchaine"},
-    {"platform": "tiktok", "key": "watch_tiktok", "video_url": "https://www.tiktok.com/@blackcoin_official"},
+    {
+        "platform": "telegram",
+        "key": "join_telegram",
+        "video_url": "https://t.me/ltn_network"
+    },
+    {
+        "platform": "facebook",
+        "key": "like_facebook",
+        "video_url": "https://www.facebook.com/share/1DMkFcwA2B/"
+    },
+    {
+        "platform": "twitter",
+        "key": "follow_twitter",
+        "video_url": "https://x.com/Liton_network"
+    },
+    {
+        "platform": "youtube",
+        "key": "subscribe_youtube",
+        "video_url": "https://youtube.com/@liton_network?si=xWWgWzHPPWmQZtML"
+    },
+    {
+        "platform": "tiktok",
+        "key": "watch_tiktok",
+        "video_url": "https://www.tiktok.com/@liton_network"
+    },
+    {
+        "platform": "instagram",
+        "key": "follow_instagram",
+        "video_url": "https://www.instagram.com/liton_network?igsh=cDc4OXF5eXM5Y2Nj"
+    },
 ]
 
 # =========================
@@ -42,39 +67,37 @@ async def seed_packs():
     async with AsyncSessionLocal() as session:
         try:
             for p in PACKS:
-                # 🔍 Vérifie si le pack existe déjà
+
                 q = await session.execute(
                     select(Action).where(Action.name == p["key"])
                 )
+
                 existing = q.scalars().first()
 
                 if existing:
-                    print(f"⚠️  '{p['key']}' existe déjà — on passe.")
+                    print(f"⚠️ '{p['key']}' existe déjà — on passe.")
                     continue
 
-                # 💰 Calcul prix
-                price_bkc = p["price"]
-                price_usdt = round(price_bkc * BKC_TO_USDT, 6)
+                price_LTN = p["price"]
+                price_usdt = round(price_LTN * LTN_TO_USDT, 6)
 
-                # 📦 Création pack (clé i18n)
                 pack = Action(
-                    name=p["key"],  # 🔥 clé i18n
+                    name=p["key"],
                     category=ActionCategory.finance,
-                    price_per_part=price_bkc,
+                    price_per_part=price_LTN,
                     price_usdt=price_usdt,
-                    value_bkc=price_bkc,
+                    value_LTN=price_LTN,
                     image_url=p["image"],
                 )
 
                 session.add(pack)
                 await session.flush()
 
-                # 📋 Création des tâches
                 tasks = [
                     DailyTask(
                         pack_id=pack.id,
-                        platform=t["platform"],       # 🔥 clé
-                        description=t["key"],         # 🔥 clé i18n
+                        platform=t["platform"],
+                        description=t["key"],
                         video_url=t["video_url"],
                         reward_share=(p["gain_percent"] / 100),
                     )
@@ -89,7 +112,6 @@ async def seed_packs():
         except Exception as e:
             await session.rollback()
             print(f"❌ Erreur lors de l’insertion : {e}")
-
 
 # =========================
 # ▶️ RUN

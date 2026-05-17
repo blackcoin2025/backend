@@ -37,7 +37,7 @@ class ActionBase(BaseModel):
     total_parts: int = 1
     price_usdt: float
     price_per_part: float
-    value_bkc: Optional[float] = None
+    value_LTN: Optional[float] = None
     image_url: Optional[str] = None
 
 
@@ -51,7 +51,7 @@ class ActionSchema(ActionBase):
 
     @computed_field
     @property
-    def estimated_daily_bkc(self) -> float:
+    def estimated_daily_LTN(self) -> float:
         return round(self.price_per_part * 0.012, 5)
 
     model_config = {"from_attributes": True}
